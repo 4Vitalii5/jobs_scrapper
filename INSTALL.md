@@ -45,7 +45,7 @@ docker-compose down
 
 1.  **Clone the Repository**:
     ```sh
-    git clone <repository-url>
+    git clone https://github.com/4Vitalii5/jobs_scrapper.git
     cd techstars-job-scraper
     ```
 
