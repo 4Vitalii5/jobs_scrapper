@@ -1,0 +1,9 @@
+version: '3.7'
+services:
+  postgres:
+    image: postgres:11.7
+    ports:
+      - 5433:5432
+    environment:
+      POSTGRES_DB: "techstars_db"
+      POSTGRES_PASSWORD: postgres
