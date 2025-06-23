@@ -19,7 +19,7 @@ A Spring Boot application for scraping job listings from [jobs.techstars.com](ht
 ## Quick Start
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/4Vitalii5/jobs_scrapper.git
 cd techstars-job-scraper
 
 # Build the application
