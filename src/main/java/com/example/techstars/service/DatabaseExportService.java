@@ -1,12 +1,11 @@
 package com.example.techstars.service;
 
+import java.io.IOException;
+import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import java.io.File;
-import java.io.IOException;
-import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -26,13 +25,6 @@ public class DatabaseExportService {
     @Value("${app.db.export.pg_dump_path:pg_dump}")
     private String pgDumpPath;
 
-    /**
-     * Exports the PostgreSQL database to a .sql file using pg_dump.
-     * Requires pg_dump to be installed and accessible in PATH.
-     *
-     * @param filePath The path to the output .sql file
-     * @return The file path if successful, or an error message
-     */
     public String exportDatabaseToSqlFile(String filePath) {
         String dbName = extractDbNameFromUrl(dbUrl);
         String dbHost = extractHostFromUrl(dbUrl);
@@ -68,19 +60,20 @@ public class DatabaseExportService {
         } catch (IOException e) {
             String errorMessage = "Error during export: " + e.getMessage();
             log.error(errorMessage, e);
-            
-            // Provide helpful guidance for common issues
-            if (e.getMessage().contains("Cannot run program") || e.getMessage().contains("CreateProcess error=2")) {
+
+            if (e.getMessage().contains("Cannot run program")
+                    || e.getMessage().contains("CreateProcess error=2")) {
                 errorMessage += "\n\nTroubleshooting:\n" +
-                    "1. Make sure PostgreSQL is installed and pg_dump is in your PATH\n" +
-                    "2. Try setting the full path to pg_dump in application.properties:\n" +
-                    "   app.db.export.pg_dump_path=C:/Program Files/PostgreSQL/[version]/bin/pg_dump.exe\n" +
-                    "3. Or add PostgreSQL bin directory to your system PATH\n" +
-                    "4. Common PostgreSQL installation paths:\n" +
-                    "   - Windows: C:/Program Files/PostgreSQL/[version]/bin/\n" +
-                    "   - Linux/Mac: /usr/bin/pg_dump or /usr/local/bin/pg_dump";
+                        "1. Make sure PostgreSQL is installed and pg_dump is in your PATH\n" +
+                        "2. Try setting the full path to pg_dump in application.properties:\n" +
+                        "   app.db.export.pg_dump_path=C:/Program Files/PostgreSQL/[version]/bin/pg_dump.exe\n"
+                        +
+                        "3. Or add PostgreSQL bin directory to your system PATH\n" +
+                        "4. Common PostgreSQL installation paths:\n" +
+                        "   - Windows: C:/Program Files/PostgreSQL/[version]/bin/\n" +
+                        "   - Linux/Mac: /usr/bin/pg_dump or /usr/local/bin/pg_dump";
             }
-            
+
             return errorMessage;
         } catch (InterruptedException e) {
             log.error("Error during database export", e);
@@ -112,7 +105,7 @@ public class DatabaseExportService {
             String[] parts = temp.split(":");
             return parts[1].split("/")[0];
         } catch (Exception e) {
-            return "5432"; // Default PostgreSQL port
+            return "5432";
         }
     }
 } 

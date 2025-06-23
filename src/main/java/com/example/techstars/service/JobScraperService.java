@@ -7,16 +7,6 @@ import com.example.techstars.repository.JobRepository;
 import com.example.techstars.repository.OrganizationRepository;
 import com.example.techstars.repository.TagRepository;
 import io.github.bonigarcia.wdm.WebDriverManager;
-import org.openqa.selenium.*;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Service;
-import lombok.RequiredArgsConstructor;
-
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -25,6 +15,19 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
+import org.openqa.selenium.NoSuchElementException;
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.WebElement;
+import org.openqa.selenium.chrome.ChromeDriver;
+import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
@@ -49,11 +52,6 @@ public class JobScraperService {
     private final OrganizationRepository organizationRepository;
     private final TagRepository tagRepository;
 
-    /**
-     * Scrapes jobs from jobs.techstars.com filtered by the given job function using Selenium.
-     * @param jobFunction the job function to filter by (e.g., "Software Engineering")
-     * @return the number of jobs scraped and saved
-     */
     public int scrapeJobsByFunction(String jobFunction) {
         WebDriver driver = null;
         int jobsSaved = 0;
@@ -62,7 +60,7 @@ public class JobScraperService {
             navigateToJobsPage(driver);
             dismissCookieBanner(driver);
             selectJobFunction(driver, jobFunction);
-            
+
             List<WebElement> jobCards = findJobCards(driver, jobFunction);
             for (WebElement card : jobCards) {
                 try {
@@ -89,8 +87,6 @@ public class JobScraperService {
         options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
         options.setExperimentalOption("excludeSwitches", Arrays.asList("enable-automation"));
         options.setExperimentalOption("useAutomationExtension", false);
-        // For debugging, you can uncomment the next line to see the browser UI.
-        // options.addArguments("--headless=new"); 
         return new ChromeDriver(options);
     }
 
@@ -112,7 +108,7 @@ public class JobScraperService {
     private void selectJobFunction(WebDriver driver, String jobFunction) throws InterruptedException {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         WebElement jobFunctionText = wait.until(ExpectedConditions.presenceOfElementLocated(JOB_FUNCTION_TEXT_SELECTOR));
-        
+
         WebElement parent = (WebElement) ((JavascriptExecutor) driver).executeScript("return arguments[0].parentNode;", jobFunctionText);
         WebElement grandparent = (WebElement) ((JavascriptExecutor) driver).executeScript("return arguments[0].parentNode;", parent);
         ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", grandparent);
@@ -128,12 +124,12 @@ public class JobScraperService {
                 }).orElse(false);
 
         if (!found) {
-            throw new RuntimeException("Job function '" + jobFunction + "' not found in dropdown options.");
+            throw new RuntimeException(
+                    "Job function '" + jobFunction + "' not found in dropdown options.");
         }
-        
-        // Wait for job cards to update after filtering
+
         wait.until(ExpectedConditions.presenceOfElementLocated(JOB_CARD_SELECTOR));
-        Thread.sleep(2000); // Allow extra time for JS to render
+        Thread.sleep(2000);
     }
 
     private List<WebElement> findJobCards(WebDriver driver, String jobFunction) {
@@ -144,7 +140,7 @@ public class JobScraperService {
 
     private void parseAndSaveJob(WebElement card, String jobFunction) {
         String jobPageUrl = getAbsoluteUrl(card.findElement(JOB_TITLE_LINK_SELECTOR).getAttribute("href"));
-        
+
         if (jobRepository.existsByJobPageUrl(jobPageUrl)) {
             return;
         }
@@ -165,12 +161,12 @@ public class JobScraperService {
 
         jobRepository.save(job);
     }
-    
+
     private Organization findOrCreateOrganization(WebElement card) {
         WebElement orgLink = card.findElement(COMPANY_LOGO_LINK_SELECTOR);
         String orgUrl = getAbsoluteUrl(orgLink.getAttribute("href"));
         String orgTitle = orgLink.findElement(By.tagName("img")).getAttribute("alt");
-        
+
         return organizationRepository.findByUrl(orgUrl)
                 .orElseGet(() -> organizationRepository.save(Organization.builder()
                         .title(orgTitle)
@@ -200,7 +196,7 @@ public class JobScraperService {
         }
         return BASE_URL + url;
     }
-    
+
     private Optional<String> getElementText(WebElement parent, By selector) {
         try {
             return Optional.of(parent.findElement(selector).getText());
@@ -216,7 +212,7 @@ public class JobScraperService {
             return Optional.empty();
         }
     }
-    
+
     private long parseDate(String dateStr) {
         try {
             return LocalDate.parse(dateStr).atStartOfDay(ZoneId.systemDefault()).toEpochSecond();

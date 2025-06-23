@@ -4,11 +4,10 @@ import com.example.techstars.model.Job;
 import com.example.techstars.model.Tag;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
-import org.springframework.data.jpa.domain.Specification;
-import org.springframework.util.StringUtils;
-
 import java.util.ArrayList;
 import java.util.List;
+import org.springframework.data.jpa.domain.Specification;
+import org.springframework.util.StringUtils;
 
 public class JobSpecification {
 
@@ -17,7 +16,8 @@ public class JobSpecification {
             List<Predicate> predicates = new ArrayList<>();
 
             if (StringUtils.hasText(location)) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("location")), "%" + location.toLowerCase() + "%"));
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("location")),
+                        "%" + location.toLowerCase() + "%"));
             }
 
             if (StringUtils.hasText(jobFunction)) {
@@ -28,8 +28,7 @@ public class JobSpecification {
                 Join<Job, Tag> tagJoin = root.join("tags");
                 predicates.add(tagJoin.get("name").in(tags));
             }
-            
-            // This is to ensure that if there are multiple tag matches for a single job, it only appears once.
+
             query.distinct(true);
 
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));

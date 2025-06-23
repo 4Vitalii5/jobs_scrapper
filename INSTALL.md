@@ -105,7 +105,7 @@ Once the application is running, you can interact with it via the REST API endpo
 ## Scrape Jobs
 Trigger scraping for a job function (e.g., "Software Engineering"):
 ```bash
-curl -X POST http://localhost:8080/scrape/Software%20Engineering
+    curl -X POST http://localhost:8080/scrape/Software%20Engineering
 ```
 
 ## Access the API
@@ -118,7 +118,7 @@ curl -X POST http://localhost:8080/scrape/Software%20Engineering
 ## Export SQL Dump
 Export the full database (schema + data) to a SQL file:
 ```bash
-curl -X POST "http://localhost:8080/export-sql?filePath=./techstars_dump.sql"
+    curl -X POST "http://localhost:8080/export-sql?filePath=./techstars_dump.sql"
 ```
 - The file will be created at the specified path.
 - If you use a password, you may need to set the `PGPASSWORD` environment variable or edit the export service.
