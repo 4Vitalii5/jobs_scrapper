@@ -1,16 +1,17 @@
-package com.example.techstars.service;
+package com.example.techstars.service.impl;
 
+import com.example.techstars.exception.ResourceNotFoundException;
 import com.example.techstars.model.Job;
 import com.example.techstars.model.Organization;
 import com.example.techstars.model.Tag;
 import com.example.techstars.repository.JobRepository;
 import com.example.techstars.repository.OrganizationRepository;
 import com.example.techstars.repository.TagRepository;
+import com.example.techstars.service.ScraperService;
 import io.github.bonigarcia.wdm.WebDriverManager;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -19,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.NoSuchElementException;
@@ -28,21 +30,19 @@ import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
-public class JobScraperService {
+@Slf4j
+public class ScraperServiceImpl implements ScraperService {
 
-    private static final Logger log = LoggerFactory.getLogger(JobScraperService.class);
     private static final String BASE_URL = "https://jobs.techstars.com";
     private static final String JOBS_URL = BASE_URL + "/jobs";
 
     private static final By COOKIE_BUTTON_SELECTOR = By.cssSelector("#onetrust-accept-btn-handler");
-    private static final By JOB_FUNCTION_TEXT_SELECTOR = By.xpath("//*[contains(text(),'Job function')]");
     private static final By DROPDOWN_OPTION_SELECTOR = By.cssSelector("div[role='option']");
+    private static final By JOB_FUNCTION_DROPDOWN_BUTTON = By.cssSelector("[data-testid='job-function']");
     private static final By JOB_CARD_SELECTOR = By.cssSelector("div[data-testid='job-list-item']");
     private static final By JOB_TITLE_LINK_SELECTOR = By.cssSelector("a[data-testid='job-title-link']");
     private static final By COMPANY_LOGO_LINK_SELECTOR = By.cssSelector("a[data-testid='company-logo-link']");
@@ -54,9 +54,10 @@ public class JobScraperService {
     private final JobRepository jobRepository;
     private final OrganizationRepository organizationRepository;
     private final TagRepository tagRepository;
-    
+
     private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
+    @Override
     public int scrapeJobsByFunction(String jobFunction) {
         WebDriver driver = null;
         int jobsSaved = 0;
@@ -68,8 +69,7 @@ public class JobScraperService {
 
             List<WebElement> jobCards = findJobCards(driver, jobFunction);
             log.info("Found {} job cards for function: {}", jobCards.size(), jobFunction);
-            
-            // Use multithreading for better performance
+
             List<CompletableFuture<Boolean>> futures = jobCards.stream()
                     .map(card -> CompletableFuture.supplyAsync(() -> {
                         try {
@@ -81,13 +81,12 @@ public class JobScraperService {
                     }, executorService))
                     .toList();
 
-            // Wait for all jobs to be processed
             CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            
-            jobsSaved = (int) futures.stream()
+
+            jobsSaved = futures.stream()
                     .mapToInt(future -> future.join() ? 1 : 0)
                     .sum();
-                    
+
         } catch (Exception e) {
             log.error("A critical error occurred during scraping: {}", e.getMessage(), e);
         } finally {
@@ -101,10 +100,16 @@ public class JobScraperService {
     private WebDriver initDriver() {
         WebDriverManager.chromedriver().setup();
         ChromeOptions options = new ChromeOptions();
-        options.addArguments("--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled");
-        options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-        options.setExperimentalOption("excludeSwitches", Arrays.asList("enable-automation"));
-        options.setExperimentalOption("useAutomationExtension", false);
+
+        options.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
+        options.addArguments("--disable-blink-features=AutomationControlled");
+
+        options.addArguments("--no-sandbox");
+        options.addArguments("--disable-dev-shm-usage");
+        options.addArguments("--disable-infobars");
+        options.addArguments("--disable-extensions");
+        options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36");
+
         return new ChromeDriver(options);
     }
 
@@ -117,37 +122,41 @@ public class JobScraperService {
             WebDriverWait shortWait = new WebDriverWait(driver, Duration.ofSeconds(5));
             WebElement cookieBtn = shortWait.until(ExpectedConditions.elementToBeClickable(COOKIE_BUTTON_SELECTOR));
             cookieBtn.click();
-            Thread.sleep(500);
+            shortWait.until(ExpectedConditions.invisibilityOfElementLocated(COOKIE_BUTTON_SELECTOR));
         } catch (Exception e) {
             log.info("Cookie banner not found or could not be clicked, continuing...");
         }
     }
 
-    private void selectJobFunction(WebDriver driver, String jobFunction) throws InterruptedException {
+    private void selectJobFunction(WebDriver driver, String jobFunction) {
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        WebElement jobFunctionText = wait.until(ExpectedConditions.presenceOfElementLocated(JOB_FUNCTION_TEXT_SELECTOR));
+        JavascriptExecutor js = (JavascriptExecutor) driver;
 
-        WebElement parent = (WebElement) ((JavascriptExecutor) driver).executeScript("return arguments[0].parentNode;", jobFunctionText);
-        WebElement grandparent = (WebElement) ((JavascriptExecutor) driver).executeScript("return arguments[0].parentNode;", parent);
-        ((JavascriptExecutor) driver).executeScript("arguments[0].scrollIntoView(true);", grandparent);
-        grandparent.click();
+        try {
+            WebElement dropdownButton = wait.until(ExpectedConditions.visibilityOfElementLocated(JOB_FUNCTION_DROPDOWN_BUTTON));
 
-        List<WebElement> optionsList = wait.until(ExpectedConditions.visibilityOfAllElementsLocatedBy(DROPDOWN_OPTION_SELECTOR));
-        boolean found = optionsList.stream()
-                .filter(option -> option.getText().trim().equalsIgnoreCase(jobFunction.trim()))
-                .findFirst()
-                .map(option -> {
-                    option.click();
-                    return true;
-                }).orElse(false);
+            js.executeScript("arguments[0].click();", dropdownButton);
 
-        if (!found) {
-            throw new RuntimeException(
-                    "Job function '" + jobFunction + "' not found in dropdown options.");
+            List<WebElement> optionsList = wait.until(ExpectedConditions.visibilityOfAllElementsLocatedBy(DROPDOWN_OPTION_SELECTOR));
+            boolean found = optionsList.stream()
+                    .filter(option -> option.getText().trim().equalsIgnoreCase(jobFunction.trim()))
+                    .findFirst()
+                    .map(option -> {
+                        js.executeScript("arguments[0].click();", option);
+                        return true;
+                    }).orElse(false);
+
+            if (!found) {
+                throw new ResourceNotFoundException(
+                        "Job function '" + jobFunction + "' not found in dropdown options.");
+            }
+
+            wait.until(ExpectedConditions.visibilityOfElementLocated(JOB_CARD_SELECTOR));
+
+        } catch (Exception e) {
+            log.error("Failed to select job function '{}'. The site might be blocking automation.", jobFunction, e);
+            throw new IllegalStateException("Could not select job function: " + jobFunction, e);
         }
-
-        wait.until(ExpectedConditions.presenceOfElementLocated(JOB_CARD_SELECTOR));
-        Thread.sleep(2000);
     }
 
     private List<WebElement> findJobCards(WebDriver driver, String jobFunction) {
@@ -167,8 +176,6 @@ public class JobScraperService {
 
             Organization org = findOrCreateOrganization(card);
             String location = getElementText(card, LOCATION_SELECTOR).orElse("");
-            
-            // Extract address from location (assuming location contains address info)
 
             Job job = Job.builder()
                     .positionName(card.findElement(JOB_TITLE_LINK_SELECTOR).getText())
@@ -250,7 +257,7 @@ public class JobScraperService {
             return 0L;
         }
     }
-    
+
     public void shutdown() {
         executorService.shutdown();
     }

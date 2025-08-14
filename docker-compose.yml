@@ -18,23 +18,3 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  app:
-    build: .
-    container_name: techstars_app
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/techstars_db
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-    volumes:
-      - ./exports:/app/exports
-      - ./logs:/app/logs
-    restart: unless-stopped
-
-volumes:
-  postgres_data:

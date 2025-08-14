@@ -1,8 +1,11 @@
-package com.example.techstars.service;
+package com.example.techstars.service.impl;
 
-import com.example.techstars.dto.JobDTO;
+import com.example.techstars.config.GoogleSheetsProperties;
+import com.example.techstars.dto.JobDto;
+import com.example.techstars.mapper.JobMapper;
 import com.example.techstars.model.Job;
 import com.example.techstars.repository.JobRepository;
+import com.example.techstars.service.SheetExportService;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
@@ -13,34 +16,32 @@ import com.google.api.services.sheets.v4.Sheets;
 import com.google.api.services.sheets.v4.SheetsScopes;
 import com.google.api.services.sheets.v4.model.ClearValuesRequest;
 import com.google.api.services.sheets.v4.model.ValueRange;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-
-import java.io.FileInputStream;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.stereotype.Service;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class GoogleSheetsService {
+public class SheetExportServiceImpl implements SheetExportService {
 
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private static final List<String> SCOPES = List.of(SheetsScopes.SPREADSHEETS);
 
-    @Value("${google.sheets.credentials.path:}")
-    private String credentialsPath;
-
-    @Value("${google.sheets.spreadsheet.id:}")
-    private String spreadsheetId;
-
+    private final JobMapper jobMapper;
+    private final GoogleSheetsProperties sheetsProperties;
     private final JobRepository jobRepository;
 
+    @Override
     public boolean exportJobsToGoogleSheets(String laborFunction) {
         try {
             List<Job> jobs = jobRepository.findByLaborFunction(laborFunction);
@@ -49,18 +50,18 @@ public class GoogleSheetsService {
                 return false;
             }
 
-            List<JobDTO> jobDTOs = jobs.stream()
-                    .map(JobDTO::fromEntity)
+            List<JobDto> jobDtos = jobs.stream()
+                    .map(jobMapper::toDto)
                     .collect(Collectors.toList());
 
-            return uploadToGoogleSheets(jobDTOs, laborFunction);
+            return uploadToGoogleSheets(jobDtos, laborFunction);
         } catch (Exception e) {
             log.error("Error exporting jobs to Google Sheets: {}", e.getMessage(), e);
             return false;
         }
     }
 
-    private boolean uploadToGoogleSheets(List<JobDTO> jobs, String sheetName) {
+    private boolean uploadToGoogleSheets(List<JobDto> jobs, String sheetName) {
         try {
             NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
             Credential credential = getCredentials(httpTransport);
@@ -69,20 +70,18 @@ public class GoogleSheetsService {
                     .setApplicationName("Techstars Job Scraper")
                     .build();
 
-            // Prepare data for upload
             List<List<Object>> data = prepareDataForUpload(jobs);
 
-            // Create or update sheet
             ValueRange body = new ValueRange().setValues(data);
-            
-            // Clear existing data and upload new data
+
             String range = sheetName + "!A1";
             service.spreadsheets().values()
-                    .clear(spreadsheetId, sheetName + "!A:Z", new ClearValuesRequest())
+                    .clear(sheetsProperties.getSpreadsheetId(),
+                            sheetName + "!A:Z", new ClearValuesRequest())
                     .execute();
-            
+
             service.spreadsheets().values()
-                    .update(spreadsheetId, range, body)
+                    .update(sheetsProperties.getSpreadsheetId(), range, body)
                     .setValueInputOption("RAW")
                     .execute();
 
@@ -94,10 +93,9 @@ public class GoogleSheetsService {
         }
     }
 
-    private List<List<Object>> prepareDataForUpload(List<JobDTO> jobs) {
+    private List<List<Object>> prepareDataForUpload(List<JobDto> jobs) {
         List<List<Object>> data = new ArrayList<>();
-        
-        // Add header row
+
         List<Object> header = List.of(
                 "Position Name", "Job Page URL", "Logo URL", "Labor Function",
                 "Posted Date", "Location", "Address", "Organization Title",
@@ -105,8 +103,7 @@ public class GoogleSheetsService {
         );
         data.add(header);
 
-        // Add data rows
-        for (JobDTO job : jobs) {
+        for (JobDto job : jobs) {
             List<Object> row = List.of(
                     job.getPositionName(),
                     job.getJobPageUrl(),
@@ -136,11 +133,13 @@ public class GoogleSheetsService {
     }
 
     private Credential getCredentials(NetHttpTransport httpTransport) throws IOException, GeneralSecurityException {
-        if (credentialsPath == null || credentialsPath.isEmpty()) {
-            throw new IllegalStateException("Google Sheets credentials path not configured");
+        String credentialsContent = sheetsProperties.getCredentials().getContent();
+
+        if (StringUtils.isBlank(credentialsContent)) {
+            throw new IllegalStateException("Google Sheets credentials content not configured. Please set GOOGLE_CREDENTIALS_JSON environment variable.");
         }
 
-        try (FileInputStream inputStream = new FileInputStream(credentialsPath)) {
+        try (InputStream inputStream = new ByteArrayInputStream(credentialsContent.getBytes(StandardCharsets.UTF_8))) {
             return GoogleCredential.fromStream(inputStream)
                     .createScoped(SCOPES);
         }
