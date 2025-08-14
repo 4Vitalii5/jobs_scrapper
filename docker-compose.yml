@@ -1,9 +1,40 @@
-version: '3.7'
+version: '3.8'
 services:
   postgres:
-    image: postgres:11.7
+    image: postgres:17-alpine
+    container_name: techstars_postgres
     ports:
-      - 5433:5432
+      - "5433:5432"
     environment:
       POSTGRES_DB: "techstars_db"
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    container_name: techstars_app
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/techstars_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    volumes:
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

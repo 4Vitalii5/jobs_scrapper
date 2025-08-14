@@ -32,7 +32,7 @@ public class Job {
     @Column(nullable = false)
     private String positionName;
 
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private String jobPageUrl;
 
     @Column(nullable = false)
@@ -49,6 +49,9 @@ public class Job {
 
     @Column(nullable = false)
     private String location;
+
+    @Column(nullable = false)
+    private String address;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "organization_id")

@@ -1,91 +1,130 @@
 package com.example.techstars.controller;
 
 import com.example.techstars.dto.JobDTO;
-import com.example.techstars.dto.OrganizationDTO;
-import com.example.techstars.dto.TagDTO;
 import com.example.techstars.model.Job;
 import com.example.techstars.repository.JobRepository;
-import com.example.techstars.repository.JobSpecification;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
+import com.example.techstars.service.DatabaseExportService;
+import com.example.techstars.service.GoogleSheetsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/jobs")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
 public class JobController {
+
     private final JobRepository jobRepository;
+    private final DatabaseExportService databaseExportService;
+    private final GoogleSheetsService googleSheetsService;
 
     @GetMapping
-    public Page<JobDTO> getJobs(
-            @RequestParam(required = false) String location,
-            @RequestParam(required = false) String jobFunction,
-            @RequestParam(required = false) String tags,
-            @RequestParam(defaultValue = "postedDate") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir,
+    public ResponseEntity<Page<JobDTO>> getAllJobs(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
-        Sort sort = Sort.by(sortDir.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC, sortBy);
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "id") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir) {
+        
+        Sort sort = sortDir.equalsIgnoreCase("desc") ? 
+                Sort.by(sortBy).descending() : Sort.by(sortBy).ascending();
         Pageable pageable = PageRequest.of(page, size, sort);
-
-        List<String> tagList = tags != null
-                && !tags.isEmpty() ? List.of(tags.split(",")) : Collections.emptyList();
-
-        Specification<Job> spec = JobSpecification.findByCriteria(location, jobFunction, tagList);
-
-        Page<Job> jobsPage = jobRepository.findAll(spec, pageable);
-
-        return jobsPage.map(this::convertToDto);
+        
+        Page<Job> jobsPage = jobRepository.findAll(pageable);
+        Page<JobDTO> jobsDTOPage = jobsPage.map(JobDTO::fromEntity);
+        
+        return ResponseEntity.ok(jobsDTOPage);
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<JobDTO> getJobById(@PathVariable Long id) {
         return jobRepository.findById(id)
-                .map(this::convertToDto)
+                .map(JobDTO::fromEntity)
                 .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+                .orElse(ResponseEntity.notFound().build());
     }
 
-    private JobDTO convertToDto(Job job) {
-        OrganizationDTO orgDto = Optional.ofNullable(job.getOrganization())
-                .map(org -> OrganizationDTO.builder()
-                        .id(org.getId())
-                        .title(org.getTitle())
-                        .url(org.getUrl())
-                        .build())
-                .orElse(null);
+    @GetMapping("/function/{laborFunction}")
+    public ResponseEntity<List<JobDTO>> getJobsByFunction(@PathVariable String laborFunction) {
+        List<Job> jobs = jobRepository.findByLaborFunction(laborFunction);
+        List<JobDTO> jobDTOs = jobs.stream()
+                .map(JobDTO::fromEntity)
+                .collect(Collectors.toList());
+        
+        return ResponseEntity.ok(jobDTOs);
+    }
 
-        List<TagDTO> tagDtos = Optional.ofNullable(job.getTags()).orElse(Collections.emptySet()).stream()
-                .map(tag -> TagDTO.builder()
-                        .id(tag.getId())
-                        .name(tag.getName())
-                        .build())
-                .toList();
+    @GetMapping("/location/{location}")
+    public ResponseEntity<List<JobDTO>> getJobsByLocation(@PathVariable String location) {
+        List<Job> jobs = jobRepository.findByLocationContainingIgnoreCase(location);
+        List<JobDTO> jobDTOs = jobs.stream()
+                .map(JobDTO::fromEntity)
+                .collect(Collectors.toList());
+        
+        return ResponseEntity.ok(jobDTOs);
+    }
 
-        return JobDTO.builder()
-                .id(job.getId())
-                .positionName(job.getPositionName())
-                .jobPageUrl(job.getJobPageUrl())
-                .logoUrl(job.getLogoUrl())
-                .laborFunction(job.getLaborFunction())
-                .postedDate(job.getPostedDate())
-                .description(job.getDescription())
-                .location(job.getLocation())
-                .organization(orgDto)
-                .tags(tagDtos)
-                .build();
+    @GetMapping("/date-range")
+    public ResponseEntity<List<JobDTO>> getJobsByDateRange(
+            @RequestParam Long startDate,
+            @RequestParam Long endDate) {
+        List<Job> jobs = jobRepository.findByPostedDateBetween(startDate, endDate);
+        List<JobDTO> jobDTOs = jobs.stream()
+                .map(JobDTO::fromEntity)
+                .collect(Collectors.toList());
+        
+        return ResponseEntity.ok(jobDTOs);
+    }
+
+    @GetMapping("/functions")
+    public ResponseEntity<List<String>> getAllLaborFunctions() {
+        List<String> functions = jobRepository.findAllLaborFunctions();
+        return ResponseEntity.ok(functions);
+    }
+
+    @GetMapping("/locations")
+    public ResponseEntity<List<String>> getAllLocations() {
+        List<String> locations = jobRepository.findAllLocations();
+        return ResponseEntity.ok(locations);
+    }
+
+    @GetMapping("/count/{function}")
+    public ResponseEntity<Long> getJobCountByFunction(@PathVariable String function) {
+        long count = jobRepository.countByLaborFunction(function);
+        return ResponseEntity.ok(count);
+    }
+
+    @PostMapping("/export/sql/{laborFunction}")
+    public ResponseEntity<String> exportJobsToSql(@PathVariable String laborFunction) {
+        try {
+            String fileName = databaseExportService.exportJobsByFunctionToSql(laborFunction);
+            return ResponseEntity.ok("Jobs exported to SQL file: " + fileName);
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body("Error exporting jobs: " + e.getMessage());
+        }
+    }
+
+    @PostMapping("/export/sheets/{laborFunction}")
+    public ResponseEntity<String> exportJobsToGoogleSheets(@PathVariable String laborFunction) {
+        try {
+            boolean success = googleSheetsService.exportJobsToGoogleSheets(laborFunction);
+            if (success) {
+                return ResponseEntity.ok("Jobs exported to Google Sheets successfully");
+            } else {
+                return ResponseEntity.internalServerError()
+                        .body("Failed to export jobs to Google Sheets");
+            }
+        } catch (Exception e) {
+            return ResponseEntity.internalServerError()
+                    .body("Error exporting jobs to Google Sheets: " + e.getMessage());
+        }
     }
 } 

@@ -1,138 +1,212 @@
-# Installation and Setup Guide
-
-This guide provides instructions on how to set up and run the Techstars Job Scraper application.
+# Techstars Job Scraper - Installation Guide
 
 ## Prerequisites
 
-- **Java Development Kit (JDK)**: Version 21 or higher.
-- **Apache Maven**: For building the project and managing dependencies.
-- **PostgreSQL**: The database used for storing scraped data (can be installed locally or run via Docker).
-- **PostgreSQL Command Line Tools**: Specifically `pg_dump`, which must be available in your system's PATH or configured in `application.properties`.
+- Java 21 or higher
+- Maven 3.6 or higher
+- Docker and Docker Compose
+- PostgreSQL (if running locally)
+- Chrome browser (for Selenium)
 
-## Database Setup Options
+## Quick Start with Docker (Recommended)
 
-### Option 1: Using Docker for Database (Recommended)
-
-If you have Docker installed, you can easily start PostgreSQL using the provided docker-compose.yml:
-
+### 1. Clone the repository
 ```bash
-# Start PostgreSQL database
+git clone <your-repository-url>
+cd jobs_scrapper
+```
+
+### 2. Run with Docker Compose
+```bash
 docker-compose up -d
-
-# The database will be available at:
-# - Host: localhost
-# - Port: 5433
-# - Database: techstars_db
-# - Username: postgres
-# - Password: postgres
 ```
 
-To stop the database:
+This will:
+- Start PostgreSQL database on port 5433
+- Build and start the Spring Boot application on port 8080
+- Create necessary volumes for data persistence
+
+### 3. Access the application
+- API Base URL: http://localhost:8080/api
+- Swagger UI: http://localhost:8080/api/swagger-ui.html
+
+## Manual Installation
+
+### 1. Database Setup
+
+#### Option A: Using Docker
 ```bash
-docker-compose down
+docker run --name techstars_postgres \
+  -e POSTGRES_DB=techstars_db \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -p 5433:5432 \
+  -d postgres:17-alpine
 ```
 
-### Option 2: Local PostgreSQL Installation
+#### Option B: Local PostgreSQL
+1. Install PostgreSQL
+2. Create database: `createdb techstars_db`
+3. Update `application.properties` with your database credentials
 
-1. **Install and Start PostgreSQL**: If you haven't already, install PostgreSQL and ensure the database server is running.
+### 2. Application Setup
 
-2. **Create a Database**: Create a new database for the application. The default configuration expects a database named `techstars_db`.
-    ```sql
-    CREATE DATABASE techstars_db;
-    ```
-
-## Application Configuration
-
-1.  **Clone the Repository**:
-    ```sh
-    git clone https://github.com/4Vitalii5/jobs_scrapper.git
-    cd techstars-job-scraper
-    ```
-
-2.  **Configure Database Connection**:
-    Open the `src/main/resources/application.properties` file and update the following properties to match your PostgreSQL setup:
-    
-    **For Docker database:**
-    ```properties
-    spring.datasource.url=jdbc:postgresql://localhost:5433/techstars_db
-    spring.datasource.username=postgres
-    spring.datasource.password=postgres
-    ```
-    
-    **For local PostgreSQL:**
-    ```properties
-    spring.datasource.url=jdbc:postgresql://localhost:5432/techstars_db
-    spring.datasource.username=your_db_username
-    spring.datasource.password=your_db_password
-    ```
-
-3.  **Configure `pg_dump` Path (Important)**:
-    This application uses the `pg_dump` utility to export the database. You need to tell the application where to find it.
-    -   **Option A (Recommended)**: Add the `bin` directory of your PostgreSQL installation (e.g., `C:\Program Files\PostgreSQL\14\bin` on Windows) to your system's `PATH` environment variable.
-    -   **Option B**: If you do not wish to modify your `PATH`, you can specify the full path to `pg_dump.exe` in `application.properties`:
-        ```properties
-        app.db.export.pg_dump_path=C:/Program Files/PostgreSQL/14/bin/pg_dump.exe
-        ```
-
-## Build and Run the Application
-
-1.  **Build the Project**:
-    Use Maven to build the application from the root directory:
-    ```sh
-    mvn clean install
-    ```
-
-2.  **Run the Application**:
-    You can run the application using the Spring Boot Maven plugin:
-    ```sh
-    mvn spring-boot:run
-    ```
-    Alternatively, you can run the JAR file from the `target` directory:
-    ```sh
-    java -jar target/techstars-0.0.1-SNAPSHOT.jar
-    ```
-
-The application will start and be accessible at `http://localhost:8080`.
-
-## How to Use
-
-Once the application is running, you can interact with it via the REST API endpoints described in the `README.md` file.
-
-- **To start scraping**: `curl -X POST http://localhost:8080/scrape/Software%20Engineering`
-- **To view jobs**: `curl http://localhost:8080/jobs`
-- **To export the database**: `curl -X POST "http://localhost:8080/export-sql"`
-
-## Scrape Jobs
-Trigger scraping for a job function (e.g., "Software Engineering"):
+#### Build the project
 ```bash
-    curl -X POST http://localhost:8080/scrape/Software%20Engineering
+mvn clean install
 ```
 
-## Access the API
-- List jobs: `GET http://localhost:8080/jobs`
-- Filter/sort jobs: `GET http://localhost:8080/jobs?location=Remote&sort=asc`
-- Get job by ID: `GET http://localhost:8080/jobs/{id}`
-- List organizations: `GET http://localhost:8080/organizations`
-- List tags: `GET http://localhost:8080/tags`
-
-## Export SQL Dump
-Export the full database (schema + data) to a SQL file:
+#### Run the application
 ```bash
-    curl -X POST "http://localhost:8080/export-sql?filePath=./techstars_dump.sql"
+mvn spring-boot:run
 ```
-- The file will be created at the specified path.
-- If you use a password, you may need to set the `PGPASSWORD` environment variable or edit the export service.
+
+## Configuration
+
+### Database Configuration
+Update `src/main/resources/application.properties`:
+
+```properties
+# Database
+spring.datasource.url=jdbc:postgresql://localhost:5433/techstars_db
+spring.datasource.username=postgres
+spring.datasource.password=postgres
+
+# JPA
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+```
+
+### Google Sheets Integration (Optional)
+To enable Google Sheets export:
+
+1. Create a Google Cloud Project
+2. Enable Google Sheets API
+3. Create service account credentials
+4. Download the JSON credentials file
+5. Update `application.properties`:
+
+```properties
+google.sheets.credentials.path=/path/to/your/credentials.json
+google.sheets.spreadsheet.id=your-spreadsheet-id
+```
+
+## Usage
+
+### 1. Scrape Jobs
+```bash
+# Scrape jobs by function
+curl -X POST "http://localhost:8080/api/scrape/Software%20Engineering"
+```
+
+### 2. View Jobs
+```bash
+# Get all jobs
+curl "http://localhost:8080/api/jobs"
+
+# Get jobs by function
+curl "http://localhost:8080/api/jobs/function/Software%20Engineering"
+
+# Get jobs by location
+curl "http://localhost:8080/api/jobs/location/New%20York"
+```
+
+### 3. Export Data
+```bash
+# Export to SQL file
+curl -X POST "http://localhost:8080/api/export/jobs/Software%20Engineering"
+
+# Export to Google Sheets (if configured)
+curl -X POST "http://localhost:8080/api/jobs/export/sheets/Software%20Engineering"
+```
+
+## API Endpoints
+
+### Scraping
+- `POST /api/scrape/{jobFunction}` - Scrape jobs by function
+
+### Jobs
+- `GET /api/jobs` - Get all jobs with pagination
+- `GET /api/jobs/{id}` - Get job by ID
+- `GET /api/jobs/function/{laborFunction}` - Get jobs by function
+- `GET /api/jobs/location/{location}` - Get jobs by location
+- `GET /api/jobs/date-range?startDate={start}&endDate={end}` - Get jobs by date range
+- `GET /api/jobs/functions` - Get all available labor functions
+- `GET /api/jobs/locations` - Get all available locations
+- `GET /api/jobs/count/{function}` - Get job count by function
+
+### Export
+- `POST /api/export/database` - Export full database to SQL
+- `POST /api/export/jobs/{laborFunction}` - Export jobs by function to SQL
+- `POST /api/jobs/export/sheets/{laborFunction}` - Export jobs to Google Sheets
 
 ## Troubleshooting
-- **pg_dump not found:** Ensure PostgreSQL tools are installed and `pg_dump` is in your system PATH.
-- **Database connection errors:** Double-check your `application.properties` for correct URL, username, and password.
-- **Port conflicts:** Make sure PostgreSQL is running on the port specified (default: 5432 for local, 5433 for Docker).
-- **Docker database issues:** Ensure Docker is running and ports are not in use.
 
-## Notes
-- The application will auto-create tables on first run (`spring.jpa.hibernate.ddl-auto=update`).
-- For production, review security and database settings.
-- Using Docker for the database is convenient for development but requires Docker to be installed.
+### Common Issues
 
----
-For more details, see the [README.md](README.md). 
+1. **Chrome/ChromeDriver issues**
+   - Ensure Chrome is installed
+   - Check Chrome version compatibility
+   - Update WebDriverManager if needed
+
+2. **Database connection issues**
+   - Verify PostgreSQL is running
+   - Check database credentials
+   - Ensure database exists
+
+3. **Selenium timeout issues**
+   - Increase timeout in `application.properties`
+   - Check internet connection
+   - Verify target website accessibility
+
+### Logs
+Check application logs:
+```bash
+# Docker
+docker-compose logs app
+
+# Local
+tail -f logs/application.log
+```
+
+## Development
+
+### Project Structure
+```
+src/main/java/com/example/techstars/
+├── controller/     # REST controllers
+├── dto/           # Data Transfer Objects
+├── model/         # JPA entities
+├── repository/    # Data access layer
+├── service/       # Business logic
+└── TechstarsApplication.java
+```
+
+### Adding New Features
+1. Create/update models in `model/` package
+2. Add repository methods in `repository/` package
+3. Implement business logic in `service/` package
+4. Create REST endpoints in `controller/` package
+5. Add DTOs if needed in `dto/` package
+
+## Performance Considerations
+
+- The application uses multithreading for job processing
+- Database indexes are created for common queries
+- Selenium WebDriver is configured for optimal performance
+- Consider using headless mode for production deployments
+
+## Security Notes
+
+- The application includes CORS configuration for development
+- Database credentials should be externalized in production
+- Google Sheets credentials should be secured
+- Consider adding authentication for production use
+
+## Support
+
+For issues and questions:
+1. Check the logs for error details
+2. Verify configuration settings
+3. Test with a simple job function first
+4. Ensure all prerequisites are met 

@@ -15,6 +15,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import lombok.RequiredArgsConstructor;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
@@ -51,6 +54,8 @@ public class JobScraperService {
     private final JobRepository jobRepository;
     private final OrganizationRepository organizationRepository;
     private final TagRepository tagRepository;
+    
+    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
 
     public int scrapeJobsByFunction(String jobFunction) {
         WebDriver driver = null;
@@ -62,14 +67,27 @@ public class JobScraperService {
             selectJobFunction(driver, jobFunction);
 
             List<WebElement> jobCards = findJobCards(driver, jobFunction);
-            for (WebElement card : jobCards) {
-                try {
-                    parseAndSaveJob(card, jobFunction);
-                    jobsSaved++;
-                } catch (Exception e) {
-                    log.error("Error parsing a job card: {}", e.getMessage());
-                }
-            }
+            log.info("Found {} job cards for function: {}", jobCards.size(), jobFunction);
+            
+            // Use multithreading for better performance
+            List<CompletableFuture<Boolean>> futures = jobCards.stream()
+                    .map(card -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            return parseAndSaveJob(card, jobFunction);
+                        } catch (Exception e) {
+                            log.error("Error parsing a job card: {}", e.getMessage());
+                            return false;
+                        }
+                    }, executorService))
+                    .toList();
+
+            // Wait for all jobs to be processed
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            
+            jobsSaved = (int) futures.stream()
+                    .mapToInt(future -> future.join() ? 1 : 0)
+                    .sum();
+                    
         } catch (Exception e) {
             log.error("A critical error occurred during scraping: {}", e.getMessage(), e);
         } finally {
@@ -138,28 +156,40 @@ public class JobScraperService {
         return jobCards;
     }
 
-    private void parseAndSaveJob(WebElement card, String jobFunction) {
-        String jobPageUrl = getAbsoluteUrl(card.findElement(JOB_TITLE_LINK_SELECTOR).getAttribute("href"));
+    private boolean parseAndSaveJob(WebElement card, String jobFunction) {
+        try {
+            String jobPageUrl = getAbsoluteUrl(card.findElement(JOB_TITLE_LINK_SELECTOR).getAttribute("href"));
 
-        if (jobRepository.existsByJobPageUrl(jobPageUrl)) {
-            return;
+            if (jobRepository.existsByJobPageUrl(jobPageUrl)) {
+                log.debug("Job already exists: {}", jobPageUrl);
+                return false;
+            }
+
+            Organization org = findOrCreateOrganization(card);
+            String location = getElementText(card, LOCATION_SELECTOR).orElse("");
+            
+            // Extract address from location (assuming location contains address info)
+
+            Job job = Job.builder()
+                    .positionName(card.findElement(JOB_TITLE_LINK_SELECTOR).getText())
+                    .jobPageUrl(jobPageUrl)
+                    .logoUrl(card.findElement(COMPANY_LOGO_LINK_SELECTOR).findElement(By.tagName("img")).getAttribute("src"))
+                    .laborFunction(jobFunction)
+                    .location(location)
+                    .address(location)
+                    .postedDate(getElementAttribute(card, POSTED_DATE_SELECTOR, "content").map(this::parseDate).orElse(0L))
+                    .description(getElementAttribute(card, DESCRIPTION_SELECTOR, "content").orElse(""))
+                    .organization(org)
+                    .tags(findOrCreateTags(card))
+                    .build();
+
+            jobRepository.save(job);
+            log.debug("Successfully saved job: {}", job.getPositionName());
+            return true;
+        } catch (Exception e) {
+            log.error("Error parsing job card: {}", e.getMessage());
+            return false;
         }
-
-        Organization org = findOrCreateOrganization(card);
-
-        Job job = Job.builder()
-                .positionName(card.findElement(JOB_TITLE_LINK_SELECTOR).getText())
-                .jobPageUrl(jobPageUrl)
-                .logoUrl(card.findElement(COMPANY_LOGO_LINK_SELECTOR).findElement(By.tagName("img")).getAttribute("src"))
-                .laborFunction(jobFunction)
-                .location(getElementText(card, LOCATION_SELECTOR).orElse(""))
-                .postedDate(getElementAttribute(card, POSTED_DATE_SELECTOR, "content").map(this::parseDate).orElse(0L))
-                .description(getElementAttribute(card, DESCRIPTION_SELECTOR, "content").orElse(""))
-                .organization(org)
-                .tags(findOrCreateTags(card))
-                .build();
-
-        jobRepository.save(job);
     }
 
     private Organization findOrCreateOrganization(WebElement card) {
@@ -219,5 +249,9 @@ public class JobScraperService {
         } catch (Exception e) {
             return 0L;
         }
+    }
+    
+    public void shutdown() {
+        executorService.shutdown();
     }
 } 
