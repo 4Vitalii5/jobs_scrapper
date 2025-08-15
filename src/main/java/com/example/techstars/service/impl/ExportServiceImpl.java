@@ -1,6 +1,7 @@
 package com.example.techstars.service.impl;
 
 import com.example.techstars.model.Job;
+import com.example.techstars.model.Location;
 import com.example.techstars.model.Organization;
 import com.example.techstars.model.Tag;
 import com.example.techstars.repository.JobRepository;
@@ -15,6 +16,7 @@ import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -23,6 +25,7 @@ public class ExportServiceImpl implements ExportService {
     private final JobRepository jobRepository;
 
     @Override
+    @Transactional(readOnly = true) // Додаємо транзакцію для лінивої ініціалізації
     public String exportDatabaseToSqlFile() throws IOException {
         String fileName = "techstars_jobs_export_" +
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".sql";
@@ -41,6 +44,7 @@ public class ExportServiceImpl implements ExportService {
     }
 
     @Override
+    @Transactional(readOnly = true) // Додаємо транзакцію для лінивої ініціалізації
     public String exportJobsByFunctionToSql(String laborFunction) throws IOException {
         String fileName =
                 "techstars_" + laborFunction.replaceAll("[^a-zA-Z0-9]", "_") + "_export_" +
@@ -67,6 +71,7 @@ public class ExportServiceImpl implements ExportService {
             return;
         }
 
+        // Збираємо всі унікальні пов'язані сутності
         List<Organization> organizations = jobs.stream()
                 .map(Job::getOrganization)
                 .distinct()
@@ -77,11 +82,28 @@ public class ExportServiceImpl implements ExportService {
                 .distinct()
                 .toList();
 
+        // Збираємо всі унікальні локації
+        List<Location> locations = jobs.stream()
+                .flatMap(job -> job.getLocations().stream())
+                .distinct()
+                .toList();
+
+        // --- Вставка даних в довідкові таблиці ---
+
         if (!organizations.isEmpty()) {
             writer.write("-- Insert organizations\n");
             for (Organization org : organizations) {
-                writer.write(String.format("INSERT INTO organization (id, title, url) VALUES (%d, '%s', '%s');\n",
-                        org.getId(), escapeSql(org.getTitle()), escapeSql(org.getUrl())));
+                writer.write(String.format("INSERT INTO organization (id, title, url, logo_url) VALUES (%d, '%s', '%s', '%s');\n",
+                        org.getId(), escapeSql(org.getTitle()), escapeSql(org.getUrl()), escapeSql(org.getLogoUrl())));
+            }
+            writer.write("\n");
+        }
+
+        if (!locations.isEmpty()) {
+            writer.write("-- Insert locations\n");
+            for (Location location : locations) {
+                writer.write(String.format("INSERT INTO location (id, name) VALUES (%d, '%s');\n",
+                        location.getId(), escapeSql(location.getName())));
             }
             writer.write("\n");
         }
@@ -95,22 +117,33 @@ public class ExportServiceImpl implements ExportService {
             writer.write("\n");
         }
 
+        // --- Вставка даних в основну таблицю ---
+
         writer.write("-- Insert jobs\n");
         for (Job job : jobs) {
+            // Видаляємо location та address з INSERT-запиту
             writer.write(String.format(
-                    "INSERT INTO job (id, position_name, job_page_url, logo_url, "
-                            + "labor_function, posted_date, description, location, address, organization_id) "
-                            + "VALUES (%d, '%s', '%s', '%s', '%s', %d, '%s', '%s', '%s', %d);\n",
+                    "INSERT INTO job (id, position_name, job_page_url, "
+                            + "labor_function, posted_date, description, organization_id) "
+                            + "VALUES (%d, '%s', '%s', '%s', %d, '%s', %d);\n",
                     job.getId(),
                     escapeSql(job.getPositionName()),
                     escapeSql(job.getJobPageUrl()),
-                    escapeSql(job.getLogoUrl()),
                     escapeSql(job.getLaborFunction()),
                     job.getPostedDate(),
                     escapeSql(job.getDescription()),
-                    escapeSql(job.getLocation()),
-                    escapeSql(job.getAddress()),
                     job.getOrganization().getId()));
+        }
+        writer.write("\n");
+
+        // --- Вставка даних в проміжні таблиці ---
+
+        writer.write("-- Insert job-location relationships\n");
+        for (Job job : jobs) {
+            for (Location location : job.getLocations()) {
+                writer.write(String.format("INSERT INTO job_location (job_id, location_id) VALUES (%d, %d);\n",
+                        job.getId(), location.getId()));
+            }
         }
         writer.write("\n");
 
@@ -123,8 +156,11 @@ public class ExportServiceImpl implements ExportService {
         }
         writer.write("\n");
 
+        // --- Оновлення послідовностей ---
+
         writer.write("-- Reset sequences to avoid conflicts on next inserts\n");
         writer.write("SELECT setval('organization_id_seq', (SELECT MAX(id) FROM organization), true);\n");
+        writer.write("SELECT setval('location_id_seq', (SELECT MAX(id) FROM location), true);\n"); // Додаємо для location
         writer.write("SELECT setval('tag_id_seq', (SELECT MAX(id) FROM tag), true);\n");
         writer.write("SELECT setval('job_id_seq', (SELECT MAX(id) FROM job), true);\n");
     }

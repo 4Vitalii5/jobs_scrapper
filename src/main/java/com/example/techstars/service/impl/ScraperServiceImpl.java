@@ -1,311 +1,239 @@
 package com.example.techstars.service.impl;
 
+import com.example.techstars.dto.GetroJobResponse;
+import com.example.techstars.dto.JobScrapedData;
 import com.example.techstars.model.Job;
+import com.example.techstars.model.Location;
 import com.example.techstars.model.Organization;
 import com.example.techstars.model.Tag;
 import com.example.techstars.repository.JobRepository;
+import com.example.techstars.repository.LocationRepository;
 import com.example.techstars.repository.OrganizationRepository;
 import com.example.techstars.repository.TagRepository;
 import com.example.techstars.service.ScraperService;
-import io.github.bonigarcia.wdm.WebDriverManager;
-import java.time.Duration;
-import java.time.LocalDate;
-import java.time.ZoneId;
+import java.io.IOException;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.openqa.selenium.By;
-import org.openqa.selenium.JavascriptExecutor;
-import org.openqa.selenium.NoSuchElementException;
-import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.openqa.selenium.chrome.ChromeOptions;
-import org.openqa.selenium.interactions.Actions;
-import org.openqa.selenium.support.ui.ExpectedConditions;
-import org.openqa.selenium.support.ui.WebDriverWait;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.client.RestTemplate;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ScraperServiceImpl implements ScraperService {
 
-    private static final String BASE_URL = "https://jobs.techstars.com";
-    private static final String JOBS_URL = BASE_URL + "/jobs";
-
-    // Improved selectors
-    private static final By COOKIE_BUTTON_SELECTOR = By.cssSelector("#onetrust-accept-btn-handler");
-    private static final By RESULTS_CONTAINER = By.cssSelector("div[data-testid='results-list']");
-    private static final By JOB_CARD_SELECTOR = By.cssSelector("div[data-testid='job-list-item']");
-    private static final By JOB_TITLE_LINK_SELECTOR = By.cssSelector("a[data-testid='job-title-link']");
-    private static final By COMPANY_LOGO_LINK_SELECTOR = By.cssSelector("a[data-testid='company-logo-link']");
-    private static final By LOCATION_SELECTOR = By.cssSelector("div[itemprop='jobLocation'] span.vIGjl");
-    private static final By POSTED_DATE_SELECTOR = By.cssSelector("meta[itemprop='datePosted']");
-    private static final By DESCRIPTION_SELECTOR = By.cssSelector("meta[itemprop='description']");
-    private static final By TAG_SELECTOR = By.cssSelector("div[data-testid='tag'] div");
+    private static final String API_SEARCH_URL = "https://api.getro.com/api/v2/collections/89/search/jobs";
+    private static final String ORG_BASE_URL = "https://jobs.techstars.com/companies/";
+    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
     private final JobRepository jobRepository;
     private final OrganizationRepository organizationRepository;
     private final TagRepository tagRepository;
-    private final ExecutorService executorService = Executors.newFixedThreadPool(4);
+    private final LocationRepository locationRepository;
+    private final RestTemplate restTemplate;
 
     @Override
-    public int scrapeJobsByFunction(String jobFunction) {
-        WebDriver driver = null;
-        int jobsSaved = 0;
+    public void scrapeJobsByFunction(String jobFunction) {
         try {
-            driver = initDriver();
-            navigateToJobsPage(driver);
-            dismissCookieBanner(driver);
-            selectJobFunction(driver, jobFunction);
+            log.info("Step 1/3: Starting API scrape for job function: {}", jobFunction);
+            GetroJobResponse apiResponse = fetchJobsFromApi(jobFunction);
 
-            List<WebElement> jobCards = findJobCards(driver, jobFunction);
-            log.info("Found {} job cards for function: {}", jobCards.size(), jobFunction);
+            if (apiResponse == null || apiResponse.results() == null
+                    || apiResponse.results().jobs() == null) {
+                log.warn("API response was empty or invalid for function: {}", jobFunction);
+                return;
+            }
+            log.info("Step 2/3: Received {} jobs from API. Fetching descriptions from jobs.techstars.com...", apiResponse.results().count());
 
-            List<CompletableFuture<Boolean>> futures = jobCards.stream()
-                    .map(card -> CompletableFuture.supplyAsync(() -> {
-                        try {
-                            return parseAndSaveJob(card, jobFunction);
-                        } catch (Exception e) {
-                            log.error("Error parsing a job card: {}", e.getMessage());
-                            return false;
-                        }
-                    }, executorService))
+            List<JobScrapedData> scrapedData = apiResponse.results().jobs().parallelStream()
+                    .filter(GetroJobResponse.JobPayload::hasDescription)
+                    .map(jobPayload -> toJobScrapedData(jobPayload, jobFunction))
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
                     .toList();
 
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            jobsSaved = futures.stream().mapToInt(future -> future.join() ? 1 : 0).sum();
+            log.info("Step 3/3: Persisting data to the database asynchronously...");
+            persistScrapedJobs(scrapedData);
 
         } catch (Exception e) {
-            log.error("A critical error occurred during scraping: {}", e.getMessage(), e);
-        } finally {
-            if (driver != null) {
-                driver.quit();
-            }
-        }
-        return jobsSaved;
-    }
-
-    private WebDriver initDriver() {
-        WebDriverManager.chromedriver().setup();
-        ChromeOptions options = new ChromeOptions();
-        options.setExperimentalOption("excludeSwitches", List.of("enable-automation"));
-        options.addArguments("--start-maximized");
-        options.addArguments(
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-infobars",
-                "--disable-extensions",
-                "--disable-web-security",
-                "--allow-running-insecure-content",
-                "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        );
-        return new ChromeDriver(options);
-    }
-
-    private void navigateToJobsPage(WebDriver driver) {
-        driver.get(JOBS_URL);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-        wait.until(ExpectedConditions.urlContains("jobs"));
-    }
-
-    private void dismissCookieBanner(WebDriver driver) {
-        try {
-            WebDriverWait shortWait = new WebDriverWait(driver, Duration.ofSeconds(5));
-            WebElement cookieBtn = shortWait.until(ExpectedConditions.elementToBeClickable(COOKIE_BUTTON_SELECTOR));
-            cookieBtn.click();
-            shortWait.until(ExpectedConditions.invisibilityOfElementLocated(COOKIE_BUTTON_SELECTOR));
-            log.info("Cookie banner dismissed");
-        } catch (Exception e) {
-            log.info("Cookie banner not found or could not be clicked, continuing...");
+            log.error("A critical error occurred during scraping for '{}': {}", jobFunction, e.getMessage(), e);
         }
     }
 
-    private void selectJobFunction(WebDriver driver, String jobFunction) {
-        log.info("=== Starting filter selection for: {} ===", jobFunction);
-        // Використовуємо WebDriverWait для надійного очікування елементів
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(20));
-        JavascriptExecutor js = (JavascriptExecutor) driver;
+    private GetroJobResponse fetchJobsFromApi(String jobFunction) {
+        HttpHeaders headers = createHeaders();
+        String requestBody = String.format("{\"query\":\"\",\"filters\":{\"job_functions\":[\"%s\"]},\"from\":0,\"size\":1000}", jobFunction);
+        HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
+        return restTemplate.postForObject(API_SEARCH_URL, entity, GetroJobResponse.class);
+    }
 
+    private String fetchJobDescription(String techstarsJobUrl) {
         try {
-            // --- КРОК 1: Клік на кнопку фільтра "Job function" ---
+            Map<String, String> headers = new HashMap<>();
+            headers.put("User-Agent", USER_AGENT);
+            headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
+            headers.put("Accept-Language", "en-US,en;q=0.9");
+            headers.put("Referer", "https://jobs.techstars.com/");
 
-            // Використовуємо стабільний data-testid для пошуку обгортки фільтра,
-            // а потім знаходимо всередині неї елемент з role="button".
-            By dropdownButtonLocator = By.cssSelector("div[data-testid='filter-option-item-0'] div[role='button']");
+            Document doc = Jsoup.connect(techstarsJobUrl).headers(headers).timeout(30000).get();
 
-            WebElement dropdownButton = wait.until(ExpectedConditions.elementToBeClickable(dropdownButtonLocator));
+            Element descriptionElement = doc.select("div[data-testid='careerPage'], div[class*='job-description-container']").first();
 
-            // JS-клік надійніший для елементів, створених фреймворками
-            js.executeScript("arguments[0].click();", dropdownButton);
-            log.info("Job function dropdown clicked successfully.");
+            return descriptionElement != null ? descriptionElement.html() : "";
 
-            // --- КРОК 2: Вибір опції зі списку ---
-
-            // Формуємо селектор, використовуючи data-testid, який містить назву функції.
-            // Це набагато надійніше, ніж шукати за текстом.
-            String optionTestId = String.format("job_functions-%s", jobFunction);
-            By optionLocator = By.cssSelector(String.format("div[data-testid='%s']", optionTestId));
-
-            WebElement option = wait.until(ExpectedConditions.elementToBeClickable(optionLocator));
-
-            // Клікаємо на знайдену опцію
-            option.click();
-            log.info("Successfully selected option: {}", jobFunction);
-
-            // --- КРОК 3: Очікування оновлення результатів ---
-
-            // Невелика пауза, щоб DOM встиг оновитися після застосування фільтра.
-            Thread.sleep(3000);
-
-            log.info("=== Filter selection completed successfully ===");
-
-        } catch (Exception e) {
-            log.error("=== FILTER SELECTION FAILED ===", e);
-            debugPageState(driver); // Ваш метод для збору налагоджувальної інформації
-            throw new IllegalStateException("Could not select job function: " + jobFunction, e);
+        } catch (IOException e) {
+            log.warn("Could not fetch description from URL {}: {}", techstarsJobUrl, e.getMessage());
+            return "";
         }
     }
 
-    private void debugPageState(WebDriver driver) {
-        try {
-            log.error("=== PAGE DEBUG INFO ===");
-            log.error("Current URL: {}", driver.getCurrentUrl());
-            log.error("Page title: {}", driver.getTitle());
+    private Optional<JobScrapedData> toJobScrapedData(GetroJobResponse.JobPayload payload, String jobFunction) {
+        // Генеруємо "нативну" URL на jobs.techstars.com
+        String techstarsJobUrl =
+                ORG_BASE_URL + payload.organization().slug() + "/jobs/" + payload.slug();
 
-            // Log visible buttons
-            List<WebElement> buttons = driver.findElements(By.tagName("button"));
-            log.error("Found {} buttons on page", buttons.size());
+        // Йдемо за описом саме на цю згенеровану сторінку
+        String description = fetchJobDescription(techstarsJobUrl);
 
-            for (int i = 0; i < Math.min(buttons.size(), 10); i++) {
-                WebElement btn = buttons.get(i);
-                log.error("Button {}: text='{}', visible={}, enabled={}",
-                        i, btn.getText(), btn.isDisplayed(), btn.isEnabled());
-            }
-
-        } catch (Exception e) {
-            log.error("Could not debug page state: {}", e.getMessage());
-        }
-    }
-
-    private List<WebElement> findJobCards(WebDriver driver, String jobFunction) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-        try {
-            // Wait for results to load
-            wait.until(ExpectedConditions.presenceOfElementLocated(RESULTS_CONTAINER));
-            Thread.sleep(2000); // Additional wait for dynamic content
-        } catch (Exception e) {
-            log.warn("Results container not found, proceeding anyway");
+        if (description == null || description.isBlank()) {
+            log.warn("Description is empty for job '{}' at {}, skipping.", payload.title(), techstarsJobUrl);
+            return Optional.empty();
         }
 
-        List<WebElement> jobCards = driver.findElements(JOB_CARD_SELECTOR);
-        log.info("Found {} job cards for function: {}", jobCards.size(), jobFunction);
-        return jobCards;
+        return Optional.of(new JobScrapedData(
+                payload.title(),
+                techstarsJobUrl,
+                jobFunction,
+                new HashSet<>(payload.locations()),
+                payload.createdAt(),
+                description,
+                payload.organization().name(),
+                ORG_BASE_URL + payload.organization().slug(),
+                payload.organization().logoUrl(),
+                new HashSet<>(payload.tags())
+        ));
     }
 
-    // Rest of the methods remain the same...
-    private boolean parseAndSaveJob(WebElement card, String jobFunction) {
-        try {
-            String jobPageUrl = getAbsoluteUrl(card.findElement(JOB_TITLE_LINK_SELECTOR).getAttribute("href"));
+    @Async
+    @Transactional
+    public void persistScrapedJobs(List<JobScrapedData> jobsData) {
+        if (jobsData.isEmpty()) {
+            log.info("No new jobs to persist.");
+            return;
+        }
+        Set<String> existingUrls = new HashSet<>(jobRepository.findAllJobUrls());
+        List<JobScrapedData> newJobsData = jobsData.stream()
+                .filter(data -> !existingUrls.contains(data.jobPageUrl()))
+                .toList();
 
-            if (jobRepository.existsByJobPageUrl(jobPageUrl)) {
-                log.debug("Job already exists: {}", jobPageUrl);
-                return false;
-            }
+        log.info("Persisting {} new jobs...", newJobsData.size());
+        Map<String, Organization> organizations = findOrCreateOrganizations(newJobsData);
+        Map<String, Tag> tags = findOrCreateTags(newJobsData);
+        Map<String, Location> locations = findOrCreateLocations(newJobsData);
 
-            Organization org = findOrCreateOrganization(card);
-            String location = getElementText(card, LOCATION_SELECTOR).orElse("");
+        List<Job> jobsToSave = newJobsData.stream().map(data -> {
+            Organization org = organizations.get(data.orgUrl());
+            Set<Tag> jobTags = data.tagNames().stream().map(tags::get).collect(Collectors.toSet());
+            Set<Location> jobLocations = data.locationNames().stream().map(locations::get).collect(Collectors.toSet());
 
-            Job job = Job.builder()
-                    .positionName(card.findElement(JOB_TITLE_LINK_SELECTOR).getText())
-                    .jobPageUrl(jobPageUrl)
-                    .logoUrl(card.findElement(COMPANY_LOGO_LINK_SELECTOR).findElement(By.tagName("img")).getAttribute("src"))
-                    .laborFunction(jobFunction)
-                    .location(location)
-                    .address(location)
-                    .postedDate(getElementAttribute(card, POSTED_DATE_SELECTOR, "content").map(this::parseDate).orElse(0L))
-                    .description(getElementAttribute(card, DESCRIPTION_SELECTOR, "content").orElse(""))
+            return Job.builder()
+                    .positionName(data.positionName())
+                    .jobPageUrl(data.jobPageUrl())
+                    .laborFunction(data.laborFunction())
+                    .locations(jobLocations)
+                    .postedDate(data.postedDate())
+                    .description(data.description())
                     .organization(org)
-                    .tags(findOrCreateTags(card))
+                    .tags(jobTags)
                     .build();
+        }).toList();
 
-            jobRepository.save(job);
-            log.debug("Successfully saved job: {}", job.getPositionName());
-            return true;
-        } catch (Exception e) {
-            log.error("Error parsing job card: {}", e.getMessage());
-            return false;
+        jobRepository.saveAll(jobsToSave);
+        log.info("Successfully saved {} new jobs to the database.", jobsToSave.size());
+    }
+
+    private Map<String, Location> findOrCreateLocations(List<JobScrapedData> jobsData) {
+        Set<String> locationNames = jobsData.stream()
+                .flatMap(data -> data.locationNames().stream())
+                .collect(Collectors.toSet());
+
+        Map<String, Location> existingLocations = locationRepository.findByNameIn(locationNames).stream()
+                .collect(Collectors.toMap(Location::getName, Function.identity()));
+
+        List<Location> newLocationsToSave = locationNames.stream()
+                .filter(name -> !existingLocations.containsKey(name))
+                .map(name -> Location.builder().name(name).build())
+                .toList();
+
+        if (!newLocationsToSave.isEmpty()) {
+            locationRepository.saveAll(newLocationsToSave)
+                    .forEach(loc -> existingLocations.put(loc.getName(), loc));
         }
+        return existingLocations;
     }
 
-    private Organization findOrCreateOrganization(WebElement card) {
-        WebElement orgLink = card.findElement(COMPANY_LOGO_LINK_SELECTOR);
-        String orgUrl = getAbsoluteUrl(orgLink.getAttribute("href"));
-        String orgTitle = orgLink.findElement(By.tagName("img")).getAttribute("alt");
+    private Map<String, Organization> findOrCreateOrganizations(List<JobScrapedData> jobsData) {
+        Set<String> orgUrls = jobsData.stream().map(JobScrapedData::orgUrl).collect(Collectors.toSet());
+        Map<String, Organization> existingOrgs = organizationRepository.findByUrlIn(orgUrls).stream()
+                .collect(Collectors.toMap(Organization::getUrl, Function.identity()));
 
-        return organizationRepository.findByUrl(orgUrl)
-                .orElseGet(() -> organizationRepository.save(Organization.builder()
-                        .title(orgTitle)
-                        .url(orgUrl)
-                        .build()));
-    }
+        // Створюємо мапу URL -> DTO, щоб уникнути повторного пошуку
+        Map<String, JobScrapedData> dataByUrl = jobsData.stream()
+                .collect(Collectors.toMap(JobScrapedData::orgUrl, Function.identity(), (d1, d2) -> d1));
 
-    private Set<Tag> findOrCreateTags(WebElement card) {
-        Set<Tag> tags = new HashSet<>();
-        List<WebElement> tagElements = card.findElements(TAG_SELECTOR);
-        for (WebElement tagEl : tagElements) {
-            String tagName = tagEl.getText().trim();
-            if (!tagName.isEmpty()) {
-                Tag tag = tagRepository.findByName(tagName)
-                        .orElseGet(() -> tagRepository.save(Tag.builder()
-                                .name(tagName)
-                                .build()));
-                tags.add(tag);
-            }
+        List<Organization> newOrgsToSave = dataByUrl.values().stream()
+                .filter(data -> !existingOrgs.containsKey(data.orgUrl()))
+                .map(data -> Organization.builder()
+                        .title(data.orgTitle())
+                        .url(data.orgUrl())
+                        .logoUrl(data.orgLogoUrl()) // <-- Зберігаємо логотип при створенні
+                        .build())
+                .toList();
+
+        if (!newOrgsToSave.isEmpty()) {
+            organizationRepository.saveAll(newOrgsToSave).forEach(org -> existingOrgs.put(org.getUrl(), org));
         }
-        return tags;
+        return existingOrgs;
     }
 
-    private String getAbsoluteUrl(String url) {
-        if (url == null || url.startsWith("http")) {
-            return url;
+    private Map<String, Tag> findOrCreateTags(List<JobScrapedData> jobsData) {
+        Set<String> tagNames = jobsData.stream()
+                .flatMap(data -> data.tagNames().stream())
+                .collect(Collectors.toSet());
+        Map<String, Tag> existingTags = tagRepository.findByNameIn(tagNames).stream()
+                .collect(Collectors.toMap(Tag::getName, Function.identity()));
+        List<Tag> newTagsToSave = tagNames.stream()
+                .filter(name -> !existingTags.containsKey(name))
+                .map(name -> Tag.builder().name(name).build())
+                .toList();
+        if (!newTagsToSave.isEmpty()) {
+            tagRepository.saveAll(newTagsToSave).forEach(tag -> existingTags.put(tag.getName(), tag));
         }
-        return BASE_URL + url;
+        return existingTags;
     }
 
-    private Optional<String> getElementText(WebElement parent, By selector) {
-        try {
-            return Optional.of(parent.findElement(selector).getText());
-        } catch (NoSuchElementException e) {
-            return Optional.empty();
-        }
-    }
-
-    private Optional<String> getElementAttribute(WebElement parent, By selector, String attribute) {
-        try {
-            return Optional.of(parent.findElement(selector).getAttribute(attribute));
-        } catch (NoSuchElementException e) {
-            return Optional.empty();
-        }
-    }
-
-    private long parseDate(String dateStr) {
-        try {
-            return LocalDate.parse(dateStr).atStartOfDay(ZoneId.systemDefault()).toEpochSecond();
-        } catch (Exception e) {
-            return 0L;
-        }
-    }
-
-    public void shutdown() {
-        executorService.shutdown();
+    private HttpHeaders createHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
+        headers.set("User-Agent", USER_AGENT);
+        return headers;
     }
 }

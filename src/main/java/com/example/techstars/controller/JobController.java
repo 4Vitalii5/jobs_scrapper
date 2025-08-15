@@ -1,6 +1,7 @@
 package com.example.techstars.controller;
 
 import com.example.techstars.dto.JobDto;
+import com.example.techstars.dto.PageDto;
 import com.example.techstars.service.ExportService;
 import com.example.techstars.service.JobService;
 import com.example.techstars.service.SheetExportService;
@@ -37,10 +38,7 @@ public class JobController {
 
     @GetMapping
     @Operation(summary = "Get all jobs", description = "Returns a paginated list of all jobs.")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")
-    })
-    public ResponseEntity<Page<JobDto>> getAllJobs(@ParameterObject Pageable pageable) {
+    public ResponseEntity<PageDto<JobDto>> getAllJobs(@ParameterObject Pageable pageable) {
         return ResponseEntity.ok(jobService.getAllJobs(pageable));
     }
 

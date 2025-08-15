@@ -36,9 +36,6 @@ public class Job {
     private String jobPageUrl;
 
     @Column(nullable = false)
-    private String logoUrl;
-
-    @Column(nullable = false)
     private String laborFunction;
 
     @Column(nullable = false)
@@ -47,15 +44,18 @@ public class Job {
     @Column(columnDefinition = "TEXT")
     private String description;
 
-    @Column(nullable = false)
-    private String location;
-
-    @Column(nullable = false)
-    private String address;
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "organization_id")
     private Organization organization;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "job_location",
+            joinColumns = @JoinColumn(name = "job_id"),
+            inverseJoinColumns = @JoinColumn(name = "location_id")
+    )
+    @Builder.Default
+    private Set<Location> locations = new HashSet<>();
 
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(

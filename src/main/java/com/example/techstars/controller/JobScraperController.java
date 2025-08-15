@@ -18,8 +18,8 @@ public class JobScraperController {
 
     @PostMapping("/{jobFunction}")
     public ResponseEntity<String> scrapeJobs(@PathVariable String jobFunction) {
-        int count = scraperService.scrapeJobsByFunction(jobFunction);
+        scraperService.scrapeJobsByFunction(jobFunction);
         return ResponseEntity.ok(
-                "Scraped and saved " + count + " jobs for function: " + jobFunction);
+                "Scraping process for job function '" + jobFunction + "' started in the background.");
     }
 } 

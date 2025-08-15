@@ -1,8 +1,10 @@
 package com.example.techstars.service.impl;
 
 import com.example.techstars.dto.JobDto;
+import com.example.techstars.dto.PageDto;
 import com.example.techstars.exception.ResourceNotFoundException;
 import com.example.techstars.mapper.JobMapper;
+import com.example.techstars.model.Job;
 import com.example.techstars.repository.JobRepository;
 import com.example.techstars.service.JobService;
 import java.util.List;
@@ -21,9 +23,13 @@ public class JobServiceImpl implements JobService {
     private final JobMapper jobMapper;
 
     @Override
-    public Page<JobDto> getAllJobs(Pageable pageable) {
-        return jobRepository.findAll(pageable)
-                .map(jobMapper::toDto);
+    public PageDto<JobDto> getAllJobs(Pageable pageable) {
+        Page<Job> jobPage = jobRepository.findAll(pageable);
+
+        List<JobDto> jobDtos = jobPage.getContent().stream()
+                .map(jobMapper::toDto)
+                .toList();
+        return new PageDto<>(jobDtos, jobPage);
     }
 
     @Override

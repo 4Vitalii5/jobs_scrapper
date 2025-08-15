@@ -107,13 +107,12 @@ public class SheetExportServiceImpl implements SheetExportService {
             List<Object> row = List.of(
                     job.getPositionName(),
                     job.getJobPageUrl(),
-                    job.getLogoUrl(),
                     job.getLaborFunction(),
                     formatDate(job.getPostedDate()),
-                    job.getLocation(),
-                    job.getAddress(),
+                    job.getLocations(),
                     job.getOrganization().getTitle(),
                     job.getOrganization().getUrl(),
+                    job.getOrganization().getLogoUrl(),
                     String.join(", ", job.getTags()),
                     job.getDescription()
             );

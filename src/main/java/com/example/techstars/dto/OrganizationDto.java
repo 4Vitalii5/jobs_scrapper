@@ -13,4 +13,5 @@ public class OrganizationDto {
     private Long id;
     private String title;
     private String url;
+    private String logoUrl;
 } 

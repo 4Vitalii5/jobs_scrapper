@@ -1,6 +1,7 @@
 package com.example.techstars.repository;
 
 import com.example.techstars.model.Job;
+import com.example.techstars.model.Location;
 import com.example.techstars.model.Tag;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.Predicate;
@@ -15,8 +16,12 @@ public class JobSpecification {
         return (root, query, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
 
+            // Оновлена логіка для фільтрації за локацією
             if (StringUtils.hasText(location)) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("location")),
+                // Робимо JOIN з таблицею локацій
+                Join<Job, Location> locationJoin = root.join("locations");
+                // Застосовуємо умову LIKE до поля 'name' в таблиці локацій
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(locationJoin.get("name")),
                         "%" + location.toLowerCase() + "%"));
             }
 
