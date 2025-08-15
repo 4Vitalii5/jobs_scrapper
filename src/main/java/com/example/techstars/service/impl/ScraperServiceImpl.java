@@ -130,413 +130,49 @@ public class ScraperServiceImpl implements ScraperService {
     }
 
     private void selectJobFunction(WebDriver driver, String jobFunction) {
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+        log.info("=== Starting filter selection for: {} ===", jobFunction);
+        // Використовуємо WebDriverWait для надійного очікування елементів
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(20));
         JavascriptExecutor js = (JavascriptExecutor) driver;
-        Actions actions = new Actions(driver);
 
         try {
-            log.info("=== Starting filter selection for: {} ===", jobFunction);
+            // --- КРОК 1: Клік на кнопку фільтра "Job function" ---
 
-            // Step 1: Find and click the Job function dropdown
-            WebElement jobFunctionDropdown = findJobFunctionDropdown(driver, wait);
-            if (jobFunctionDropdown == null) {
-                throw new IllegalStateException("Could not locate Job function dropdown");
-            }
+            // Використовуємо стабільний data-testid для пошуку обгортки фільтра,
+            // а потім знаходимо всередині неї елемент з role="button".
+            By dropdownButtonLocator = By.cssSelector("div[data-testid='filter-option-item-0'] div[role='button']");
 
-            // Scroll to element and click
-            js.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", jobFunctionDropdown);
-            wait.until(ExpectedConditions.elementToBeClickable(jobFunctionDropdown));
+            WebElement dropdownButton = wait.until(ExpectedConditions.elementToBeClickable(dropdownButtonLocator));
 
-            try {
-                jobFunctionDropdown.click();
-            } catch (Exception e) {
-                log.info("Regular click failed, trying JavaScript click");
-                js.executeScript("arguments[0].click();", jobFunctionDropdown);
-            }
+            // JS-клік надійніший для елементів, створених фреймворками
+            js.executeScript("arguments[0].click();", dropdownButton);
+            log.info("Job function dropdown clicked successfully.");
 
-            log.info("Job function dropdown clicked, waiting for options to appear...");
-            Thread.sleep(2000); // Give time for dropdown to open
+            // --- КРОК 2: Вибір опції зі списку ---
 
-            // Step 2: Wait for dropdown options to be visible and select the option
-            boolean optionSelected = selectFromDropdownOptions(driver, wait, js, jobFunction);
+            // Формуємо селектор, використовуючи data-testid, який містить назву функції.
+            // Це набагато надійніше, ніж шукати за текстом.
+            String optionTestId = String.format("job_functions-%s", jobFunction);
+            By optionLocator = By.cssSelector(String.format("div[data-testid='%s']", optionTestId));
 
-            if (!optionSelected) {
-                throw new IllegalStateException("Could not select option: " + jobFunction);
-            }
+            WebElement option = wait.until(ExpectedConditions.elementToBeClickable(optionLocator));
 
-            // Step 3: Verify selection and wait for results to load
+            // Клікаємо на знайдену опцію
+            option.click();
+            log.info("Successfully selected option: {}", jobFunction);
+
+            // --- КРОК 3: Очікування оновлення результатів ---
+
+            // Невелика пауза, щоб DOM встиг оновитися після застосування фільтра.
             Thread.sleep(3000);
+
             log.info("=== Filter selection completed successfully ===");
 
         } catch (Exception e) {
             log.error("=== FILTER SELECTION FAILED ===", e);
-            debugPageState(driver);
+            debugPageState(driver); // Ваш метод для збору налагоджувальної інформації
             throw new IllegalStateException("Could not select job function: " + jobFunction, e);
         }
-    }
-
-    private WebElement findJobFunctionDropdown(WebDriver driver, WebDriverWait wait) {
-        log.info("Searching for Job function dropdown...");
-
-        // Multiple strategies to find the dropdown
-        String[] dropdownStrategies = {
-                "//button[contains(text(), 'Job function')]",
-                "//div[@role='button' and contains(text(), 'Job function')]",
-                "//*[contains(text(), 'Job function') and (@role='button' or ancestor::button)]",
-                "//button[.//span[contains(text(), 'Job function')]]",
-                "//div[.//span[contains(text(), 'Job function')] and (@role='button' or @onclick)]",
-                "//*[contains(@class, 'dropdown') and contains(text(), 'Job function')]"
-        };
-
-        for (String strategy : dropdownStrategies) {
-            try {
-                List<WebElement> elements = driver.findElements(By.xpath(strategy));
-                for (WebElement element : elements) {
-                    if (element.isDisplayed() && element.isEnabled()) {
-                        log.info("Found Job function dropdown using strategy: {}", strategy);
-                        return element;
-                    }
-                }
-            } catch (Exception e) {
-                log.debug("Strategy failed: {} - {}", strategy, e.getMessage());
-            }
-        }
-
-        // Fallback: look for any clickable element containing "Job function"
-        try {
-            List<WebElement> allElements = driver.findElements(By.xpath("//*[contains(text(), 'Job function')]"));
-            for (WebElement element : allElements) {
-                WebElement clickableParent = findClickableParent(element);
-                if (clickableParent != null) {
-                    log.info("Found Job function dropdown via parent traversal");
-                    return clickableParent;
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Parent traversal failed: {}", e.getMessage());
-        }
-
-        return null;
-    }
-
-    private WebElement findClickableParent(WebElement element) {
-        WebElement current = element;
-        for (int i = 0; i < 5; i++) {
-            try {
-                if (isClickableElement(current)) {
-                    return current;
-                }
-                current = current.findElement(By.xpath(".."));
-            } catch (Exception e) {
-                break;
-            }
-        }
-        return null;
-    }
-
-    private boolean isClickableElement(WebElement element) {
-        try {
-            String tagName = element.getTagName().toLowerCase();
-            String role = element.getAttribute("role");
-            String onclick = element.getAttribute("onclick");
-            String className = element.getAttribute("class");
-
-            return element.isDisplayed() && element.isEnabled() && (
-                    tagName.equals("button") ||
-                            "button".equals(role) ||
-                            onclick != null ||
-                            (className != null && (
-                                    className.contains("dropdown") ||
-                                            className.contains("select") ||
-                                            className.contains("clickable") ||
-                                            className.contains("btn")
-                            ))
-            );
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean selectFromDropdownOptions(WebDriver driver, WebDriverWait wait, JavascriptExecutor js, String jobFunction) {
-        log.info("Searching for option: {}", jobFunction);
-
-        // Wait for dropdown options to appear - increased timeout for dynamic content
-        try {
-            wait.until(drivers -> {
-                List<WebElement> visibleElements = drivers.findElements(By.xpath("//*[text()]"));
-                long optionsCount = visibleElements.stream()
-                        .filter(el -> el.isDisplayed() && !el.getText().trim().isEmpty())
-                        .count();
-                log.debug("Found {} visible text elements", optionsCount);
-                return optionsCount > 10; // Wait for multiple options to appear
-            });
-            Thread.sleep(1000); // Additional wait for full rendering
-        } catch (Exception e) {
-            log.warn("Timeout waiting for dropdown options to appear");
-        }
-
-        // Strategy 1: Look for exact text match with dynamic class handling
-        String[] exactMatchSelectors = {
-                String.format("//*[normalize-space(text())='%s']", jobFunction),
-                String.format("//div[normalize-space(text())='%s']", jobFunction),
-                String.format("//span[normalize-space(text())='%s']", jobFunction),
-                String.format("//li[normalize-space(text())='%s']", jobFunction),
-                String.format("//*[text()='%s']", jobFunction)
-        };
-
-        for (String selector : exactMatchSelectors) {
-            if (trySelectOption(driver, js, selector, "exact match")) {
-                return true;
-            }
-        }
-
-        // Strategy 2: Look for elements that contain the text (for dynamic components)
-        String[] containerSelectors = {
-                String.format("//*[contains(normalize-space(text()), '%s') and string-length(normalize-space(text())) < 20]", jobFunction),
-                String.format("//div[text()='%s']", jobFunction),
-                String.format("//span[text()='%s']", jobFunction)
-        };
-
-        for (String selector : containerSelectors) {
-            if (trySelectOption(driver, js, selector, "container match")) {
-                return true;
-            }
-        }
-
-        // Strategy 3: Handle dynamic class names (like divsc-beqWaB-cRYWHK)
-        // Look for elements with dynamic classes that contain our text
-        String[] dynamicSelectors = {
-                String.format("//*[starts-with(@class, 'div') and contains(@class, '-') and normalize-space(text())='%s']", jobFunction),
-                String.format("//*[contains(@class, 'beq') and normalize-space(text())='%s']", jobFunction),
-                String.format("//*[contains(@class, 'sc-') and normalize-space(text())='%s']", jobFunction)
-        };
-
-        for (String selector : dynamicSelectors) {
-            if (trySelectOption(driver, js, selector, "dynamic class match")) {
-                return true;
-            }
-        }
-
-        // Strategy 4: Try clicking on parent containers of text elements
-        try {
-            List<WebElement> textElements = driver.findElements(By.xpath(String.format("//*[normalize-space(text())='%s']", jobFunction)));
-            for (WebElement textElement : textElements) {
-                if (textElement.isDisplayed()) {
-                    // Try the element itself
-                    if (attemptClickWithParents(textElement, js, 0)) {
-                        log.info("Successfully clicked on text element directly");
-                        return true;
-                    }
-
-                    // Try parent elements
-                    WebElement parent = textElement;
-                    for (int level = 1; level <= 3; level++) {
-                        try {
-                            parent = parent.findElement(By.xpath(".."));
-                            if (attemptClickWithParents(parent, js, level)) {
-                                log.info("Successfully clicked on parent at level {}", level);
-                                return true;
-                            }
-                        } catch (Exception e) {
-                            break;
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Parent traversal strategy failed: {}", e.getMessage());
-        }
-
-        // Strategy 5: Mouse hover and click approach
-        try {
-            Actions actions = new Actions(driver);
-            List<WebElement> possibleOptions = driver.findElements(By.xpath(String.format("//*[normalize-space(text())='%s']", jobFunction)));
-
-            for (WebElement option : possibleOptions) {
-                if (option.isDisplayed()) {
-                    try {
-                        actions.moveToElement(option).pause(Duration.ofMillis(500)).click().perform();
-                        log.info("Successfully clicked using Actions");
-                        Thread.sleep(1000);
-                        return true;
-                    } catch (Exception e) {
-                        log.debug("Actions click failed: {}", e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("Actions strategy failed: {}", e.getMessage());
-        }
-
-        // Strategy 6: Debug - list all available options
-        debugAvailableOptions(driver);
-
-        return false;
-    }
-
-    private boolean attemptClickWithParents(WebElement element, JavascriptExecutor js, int level) {
-        try {
-            // Check if element looks clickable
-            String tagName = element.getTagName().toLowerCase();
-            String className = element.getAttribute("class");
-
-            if (!element.isDisplayed() || !element.isEnabled()) {
-                return false;
-            }
-
-            // Scroll to element
-            js.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", element);
-            Thread.sleep(300);
-
-            // Try clicking
-            if (clickElement(element, js)) {
-                Thread.sleep(1000);
-                return true;
-            }
-        } catch (Exception e) {
-            log.debug("Click attempt failed at level {}: {}", level, e.getMessage());
-        }
-        return false;
-    }
-
-    private boolean trySelectOption(WebDriver driver, JavascriptExecutor js, String selector, String strategy) {
-        try {
-            log.debug("Trying {} with selector: {}", strategy, selector);
-            List<WebElement> options = driver.findElements(By.xpath(selector));
-
-            for (WebElement option : options) {
-                if (option.isDisplayed()) {
-                    log.info("Found option using {}: text='{}', tag='{}'",
-                            strategy, option.getText(), option.getTagName());
-
-                    try {
-                        // Scroll into view
-                        js.executeScript("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", option);
-                        Thread.sleep(500);
-
-                        // Try different click methods
-                        if (clickElement(option, js)) {
-                            log.info("Successfully selected option using {}", strategy);
-                            Thread.sleep(1000);
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        log.debug("Failed to click option: {}", e.getMessage());
-                    }
-                }
-            }
-        } catch (Exception e) {
-            log.debug("{} strategy failed: {}", strategy, e.getMessage());
-        }
-        return false;
-    }
-
-    private boolean clickElement(WebElement element, JavascriptExecutor js) {
-        // Try multiple click methods
-        try {
-            // Method 1: Regular click
-            element.click();
-            log.debug("Regular click succeeded");
-            return true;
-        } catch (Exception e1) {
-            try {
-                // Method 2: JavaScript click
-                js.executeScript("arguments[0].click();", element);
-                log.debug("JavaScript click succeeded");
-                return true;
-            } catch (Exception e2) {
-                try {
-                    // Method 3: Dispatch click event
-                    js.executeScript("arguments[0].dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));", element);
-                    log.debug("Dispatch event click succeeded");
-                    return true;
-                } catch (Exception e3) {
-                    try {
-                        // Method 4: Force click via coordinates
-                        js.executeScript(
-                                "var rect = arguments[0].getBoundingClientRect();" +
-                                        "var clickEvent = new MouseEvent('click', {" +
-                                        "  bubbles: true," +
-                                        "  cancelable: true," +
-                                        "  clientX: rect.left + rect.width / 2," +
-                                        "  clientY: rect.top + rect.height / 2" +
-                                        "});" +
-                                        "arguments[0].dispatchEvent(clickEvent);", element);
-                        log.debug("Coordinate-based click succeeded");
-                        return true;
-                    } catch (Exception e4) {
-                        try {
-                            // Method 5: Try triggering mousedown and mouseup
-                            js.executeScript(
-                                    "var element = arguments[0];" +
-                                            "element.dispatchEvent(new MouseEvent('mousedown', {bubbles: true}));" +
-                                            "element.dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));" +
-                                            "element.dispatchEvent(new MouseEvent('click', {bubbles: true}));", element);
-                            log.debug("Mouse event sequence succeeded");
-                            return true;
-                        } catch (Exception e5) {
-                            log.debug("All click methods failed. Last error: {}", e5.getMessage());
-                            return false;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private void debugAvailableOptions(WebDriver driver) {
-        log.info("=== DEBUG: Available dropdown options ===");
-        try {
-            // Look for all visible text elements that might be options
-            List<WebElement> allTextElements = driver.findElements(By.xpath("//*[text() and string-length(normalize-space(text())) > 0 and string-length(normalize-space(text())) < 50]"));
-
-            int count = 0;
-            Set<String> uniqueTexts = new HashSet<>();
-
-            for (WebElement element : allTextElements) {
-                if (element.isDisplayed() && count < 30) {
-                    String text = element.getText().trim();
-                    String tagName = element.getTagName();
-                    String className = element.getAttribute("class");
-
-                    if (!text.isEmpty() && !uniqueTexts.contains(text)) {
-                        uniqueTexts.add(text);
-                        log.info("Option {}: text='{}', tag='{}', class='{}'",
-                                count++, text, tagName, className != null ? className.substring(0, Math.min(className.length(), 50)) : "null");
-
-                        // Log parent info for potential clicking targets
-                        try {
-                            WebElement parent = element.findElement(By.xpath(".."));
-                            String parentTag = parent.getTagName();
-                            String parentClass = parent.getAttribute("class");
-                            log.info("  -> Parent: tag='{}', class='{}'", parentTag,
-                                    parentClass != null ? parentClass.substring(0, Math.min(parentClass.length(), 50)) : "null");
-                        } catch (Exception e) {
-                            // Ignore parent lookup errors
-                        }
-                    }
-                }
-            }
-
-            // Also log elements with dynamic class names pattern
-            log.info("=== Elements with dynamic classes ===");
-            List<WebElement> dynamicElements = driver.findElements(By.xpath("//*[contains(@class, 'sc-') or contains(@class, 'divsc-') or starts-with(@class, 'div')]"));
-            count = 0;
-            for (WebElement element : dynamicElements) {
-                if (element.isDisplayed() && count < 10) {
-                    String text = element.getText().trim();
-                    String className = element.getAttribute("class");
-                    if (!text.isEmpty() && text.length() < 30) {
-                        log.info("Dynamic {}: text='{}', class='{}'",
-                                count++, text, className != null ? className.substring(0, Math.min(className.length(), 60)) : "null");
-                    }
-                }
-            }
-
-        } catch (Exception e) {
-            log.error("Failed to debug options: {}", e.getMessage());
-        }
-        log.info("=== END DEBUG ===");
     }
 
     private void debugPageState(WebDriver driver) {
