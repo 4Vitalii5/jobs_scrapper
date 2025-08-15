@@ -9,12 +9,3 @@ services:
       POSTGRES_DB: "techstars_db"
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "postgres"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
