@@ -1,7 +1,6 @@
 package com.example.techstars.repository;
 
 import com.example.techstars.model.Job;
-import jakarta.persistence.Entity;
 import java.util.List;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -11,6 +10,7 @@ import org.springframework.data.repository.query.Param;
 
 public interface JobRepository extends JpaRepository<Job, Long>, JpaSpecificationExecutor<Job> {
 
+    @EntityGraph(attributePaths = {"locations", "tags", "organization"})
     List<Job> findByLaborFunction(String laborFunction);
 
     @Query("SELECT j FROM Job j JOIN j.locations l WHERE lower(l.name) LIKE lower(concat('%', :location, '%'))")

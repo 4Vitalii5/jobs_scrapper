@@ -99,14 +99,6 @@ public class JobController {
         return ResponseEntity.ok(jobService.getJobCountByFunction(function));
     }
 
-    @PostMapping("/export/sql/{laborFunction}")
-    @Operation(summary = "Export jobs to sql by labor function")
-    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
-    public ResponseEntity<String> exportJobsToSql(@PathVariable String laborFunction) throws IOException {
-        String fileName = databaseExportService.exportJobsByFunctionToSql(laborFunction);
-        return ResponseEntity.ok("Jobs exported to SQL file: " + fileName);
-    }
-
     @PostMapping("/export/sheets/{laborFunction}")
     @Operation(summary = "Export jobs to google sheets")
     @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})

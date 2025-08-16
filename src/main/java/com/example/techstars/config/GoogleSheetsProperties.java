@@ -13,6 +13,6 @@ public class GoogleSheetsProperties {
 
     @Data
     public static class Credentials {
-        private String content;
+        private String base64;
     }
 }
