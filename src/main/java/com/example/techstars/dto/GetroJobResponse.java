@@ -8,8 +8,7 @@ import java.util.List;
 public record GetroJobResponse(Results results) {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record Results(List<JobPayload> jobs, int count) {
-    }
+    public record Results(List<JobPayload> jobs, int count) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record JobPayload(
@@ -19,24 +18,16 @@ public record GetroJobResponse(Results results) {
             String url,
             @JsonProperty("has_description") boolean hasDescription,
             @JsonProperty("created_at") long createdAt,
+            String description,
             List<String> locations,
             OrganizationPayload organization,
             @JsonProperty("skills") List<String> tags
-    ) {
-    }
+    ) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record OrganizationPayload(
             String name,
             @JsonProperty("logo_url") String logoUrl,
             String slug
-    ) {
-    }
-
-    // Новий record для детальної інформації про одну вакансію
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public record JobDetailPayload(
-            @JsonProperty("description_html") String descriptionHtml
-    ) {
-    }
+    ) {}
 }

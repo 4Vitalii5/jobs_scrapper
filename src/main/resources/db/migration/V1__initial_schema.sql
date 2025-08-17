@@ -22,7 +22,7 @@ CREATE TABLE location (
 CREATE TABLE job (
     id BIGSERIAL PRIMARY KEY,
     position_name VARCHAR(500) NOT NULL,
-    job_page_url VARCHAR(500) NOT NULL UNIQUE,
+    job_page_url VARCHAR(500) NOT NULL,
     labor_function VARCHAR(255) NOT NULL,
     posted_date BIGINT NOT NULL,
     description TEXT,

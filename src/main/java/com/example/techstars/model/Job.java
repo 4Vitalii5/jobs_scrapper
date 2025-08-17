@@ -32,7 +32,7 @@ public class Job {
     @Column(nullable = false)
     private String positionName;
 
-    @Column(nullable = false, unique = true)
+    @Column(nullable = false)
     private String jobPageUrl;
 
     @Column(nullable = false)

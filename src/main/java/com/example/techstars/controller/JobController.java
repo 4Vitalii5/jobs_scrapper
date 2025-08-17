@@ -2,7 +2,7 @@ package com.example.techstars.controller;
 
 import com.example.techstars.dto.JobDto;
 import com.example.techstars.dto.PageDto;
-import com.example.techstars.service.ExportService;
+import com.example.techstars.model.Function;
 import com.example.techstars.service.JobService;
 import com.example.techstars.service.SheetExportService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,11 +11,9 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import java.io.IOException;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -33,7 +31,6 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Job Controller", description = "Endpoints for retrieving and filtering jobs")
 public class JobController {
     private final JobService jobService;
-    private final ExportService databaseExportService;
     private final SheetExportService googleSheetsService;
 
     @GetMapping
@@ -56,10 +53,10 @@ public class JobController {
     @Operation(summary = "Get jobs by labor function")
     @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
     public ResponseEntity<List<JobDto>> getJobsByFunction(
-            @Parameter(description = "Labor function to filter by (e.g., 'Software Engineering')")
-            @PathVariable String laborFunction
+            @Parameter(description = "Labor function to filter by (e.g., 'Software Engineering')", required = true)
+            @PathVariable Function laborFunction
     ) {
-        return ResponseEntity.ok(jobService.getJobsByFunction(laborFunction));
+        return ResponseEntity.ok(jobService.getJobsByFunction(laborFunction.getLabel()));
     }
 
     @GetMapping("/location/{location}")

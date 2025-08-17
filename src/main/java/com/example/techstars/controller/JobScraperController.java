@@ -1,6 +1,8 @@
 package com.example.techstars.controller;
 
+import com.example.techstars.model.Function;
 import com.example.techstars.service.ScraperService;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +19,10 @@ public class JobScraperController {
     private final ScraperService scraperService;
 
     @PostMapping("/{jobFunction}")
-    public ResponseEntity<String> scrapeJobs(@PathVariable String jobFunction) {
-        scraperService.scrapeJobsByFunction(jobFunction);
+    public ResponseEntity<String> scrapeJobs(@Parameter(description = "Job function to scrape", required = true)
+                                                 @PathVariable Function jobFunction) {
+        scraperService.scrapeJobsByFunction(jobFunction.getLabel());
         return ResponseEntity.ok(
                 "Scraping process for job function '" + jobFunction + "' started in the background.");
     }
-} 
+}

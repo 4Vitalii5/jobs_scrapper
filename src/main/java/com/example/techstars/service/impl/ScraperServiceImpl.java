@@ -1,5 +1,7 @@
 package com.example.techstars.service.impl;
 
+import com.example.techstars.client.GetroApiClient;
+import com.example.techstars.dto.GetroApiRequest;
 import com.example.techstars.dto.GetroJobResponse;
 import com.example.techstars.dto.JobScrapedData;
 import com.example.techstars.model.Job;
@@ -12,8 +14,7 @@ import com.example.techstars.repository.OrganizationRepository;
 import com.example.techstars.repository.TagRepository;
 import com.example.techstars.service.ScraperService;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -26,109 +27,138 @@ import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.retry.annotation.Backoff;
+import org.springframework.retry.annotation.Retryable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.util.StringUtils;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ScraperServiceImpl implements ScraperService {
+    @Value("${scraper.request-delay:500}")
+    private long requestDelayMs;
 
-    private static final String API_SEARCH_URL = "https://api.getro.com/api/v2/collections/89/search/jobs";
+    @Value("${scraper.random-delay:true}")
+    private boolean useRandomDelay;
+
     private static final String ORG_BASE_URL = "https://jobs.techstars.com/companies/";
-    private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    private static final List<String> USER_AGENTS = List.of(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
+    );
 
     private final JobRepository jobRepository;
     private final OrganizationRepository organizationRepository;
     private final TagRepository tagRepository;
     private final LocationRepository locationRepository;
-    private final RestTemplate restTemplate;
+    private final GetroApiClient getroApiClient;
 
     @Override
     public void scrapeJobsByFunction(String jobFunction) {
         try {
-            log.info("Step 1/3: Starting API scrape for job function: {}", jobFunction);
-            GetroJobResponse apiResponse = fetchJobsFromApi(jobFunction);
+            log.info("Step 1/3: Starting API scrape for job list for function: '{}'", jobFunction);
+            List<GetroJobResponse.JobPayload> allJobs = fetchAllJobSummaries(jobFunction);
 
-            if (apiResponse == null || apiResponse.results() == null
-                    || apiResponse.results().jobs() == null) {
-                log.warn("API response was empty or invalid for function: {}", jobFunction);
-                return;
-            }
-            log.info("Step 2/3: Received {} jobs from API. Fetching descriptions from jobs.techstars.com...", apiResponse.results().count());
+            log.info("Step 2/3: Received {} unique jobs from API. Fetching descriptions using Jsoup...", allJobs.size());
 
-            List<JobScrapedData> scrapedData = apiResponse.results().jobs().parallelStream()
+            List<JobScrapedData> scrapedData = allJobs.parallelStream()
                     .filter(GetroJobResponse.JobPayload::hasDescription)
                     .map(jobPayload -> toJobScrapedData(jobPayload, jobFunction))
-                    .filter(Optional::isPresent)
-                    .map(Optional::get)
+                    .flatMap(Optional::stream)
                     .toList();
 
-            log.info("Step 3/3: Persisting data to the database asynchronously...");
-            persistScrapedJobs(scrapedData);
+            log.info("Step 3/3: Successfully scraped {} descriptions. Persisting data...", scrapedData.size());
+            persistScrapedJobsAsync(scrapedData);
 
         } catch (Exception e) {
             log.error("A critical error occurred during scraping for '{}': {}", jobFunction, e.getMessage(), e);
         }
     }
 
-    private GetroJobResponse fetchJobsFromApi(String jobFunction) {
-        HttpHeaders headers = createHeaders();
-        String requestBody = String.format("{\"query\":\"\",\"filters\":{\"job_functions\":[\"%s\"]},\"from\":0,\"size\":1000}", jobFunction);
-        HttpEntity<String> entity = new HttpEntity<>(requestBody, headers);
-        return restTemplate.postForObject(API_SEARCH_URL, entity, GetroJobResponse.class);
+    @Async("scrapingTaskExecutor")
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void persistScrapedJobsAsync(List<JobScrapedData> jobsData) {
+        persistScrapedJobs(jobsData);
     }
 
+    private List<GetroJobResponse.JobPayload> fetchAllJobSummaries(String jobFunction) {
+        List<GetroJobResponse.JobPayload> allJobs = new ArrayList<>();
+        int from = 0;
+        int totalJobs;
+
+        do {
+            GetroApiRequest request = new GetroApiRequest(new GetroApiRequest.Filters(List.of(jobFunction)), from);
+            GetroJobResponse apiResponse = getroApiClient.searchJobsByFunction(request);
+
+            if (apiResponse == null || apiResponse.results() == null
+                    || apiResponse.results().jobs() == null
+                    || apiResponse.results().jobs().isEmpty()) {
+                log.info("API returned no more jobs. Finishing pagination.");
+                break;
+            }
+
+            List<GetroJobResponse.JobPayload> jobsOnPage = apiResponse.results().jobs();
+            allJobs.addAll(jobsOnPage);
+            totalJobs = apiResponse.results().count();
+            from += jobsOnPage.size();
+
+            log.info("Fetched {} jobs of {}. Continuing...", allJobs.size(), totalJobs);
+
+        } while (from < totalJobs);
+
+        return allJobs;
+    }
+
+    @Retryable(retryFor = IOException.class, maxAttempts = 3, backoff = @Backoff(delay = 1000))
     private String fetchJobDescription(String techstarsJobUrl) {
         try {
-            Map<String, String> headers = new HashMap<>();
-            headers.put("User-Agent", USER_AGENT);
-            headers.put("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8");
-            headers.put("Accept-Language", "en-US,en;q=0.9");
-            headers.put("Referer", "https://jobs.techstars.com/");
-
-            Document doc = Jsoup.connect(techstarsJobUrl).headers(headers).timeout(30000).get();
-
-            Element descriptionElement = doc.select("div[data-testid='careerPage'], div[class*='job-description-container']").first();
-
+            Document doc = Jsoup.connect(techstarsJobUrl)
+                    .userAgent(getRandomUserAgent())
+                    .timeout(30000)
+                    .get();
+            Element descriptionElement = doc.select("div[data-testid='careerPage'], div[class*='job-description']").first();
             return descriptionElement != null ? descriptionElement.html() : "";
-
         } catch (IOException e) {
             log.warn("Could not fetch description from URL {}: {}", techstarsJobUrl, e.getMessage());
             return "";
         }
     }
 
+    private String getRandomUserAgent() {
+        String[] userAgents = {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
+        };
+        return userAgents[(int) (Math.random() * userAgents.length)];
+    }
+
     private Optional<JobScrapedData> toJobScrapedData(GetroJobResponse.JobPayload payload, String jobFunction) {
-        // Генеруємо "нативну" URL на jobs.techstars.com
-        String techstarsJobUrl =
-                ORG_BASE_URL + payload.organization().slug() + "/jobs/" + payload.slug();
+        String jobUrl = ORG_BASE_URL + payload.organization().slug() + "/jobs/" + payload.slug();
+        String description = fetchJobDescription(jobUrl);
 
-        // Йдемо за описом саме на цю згенеровану сторінку
-        String description = fetchJobDescription(techstarsJobUrl);
-
-        if (description == null || description.isBlank()) {
-            log.warn("Description is empty for job '{}' at {}, skipping.", payload.title(), techstarsJobUrl);
-            return Optional.empty();
+        if (StringUtils.hasText(description)) {
+            return Optional.of(new JobScrapedData(
+                    payload.title(),
+                    jobUrl,
+                    jobFunction,
+                    new HashSet<>(payload.locations()),
+                    payload.createdAt(),
+                    description,
+                    payload.organization().name(),
+                    ORG_BASE_URL + payload.organization().slug(),
+                    payload.organization().logoUrl(),
+                    new HashSet<>(payload.tags())
+            ));
         }
-
-        return Optional.of(new JobScrapedData(
-                payload.title(),
-                techstarsJobUrl,
-                jobFunction,
-                new HashSet<>(payload.locations()),
-                payload.createdAt(),
-                description,
-                payload.organization().name(),
-                ORG_BASE_URL + payload.organization().slug(),
-                payload.organization().logoUrl(),
-                new HashSet<>(payload.tags())
-        ));
+        log.warn("Description is empty for job '{}' at {}, skipping.", payload.title(), jobUrl);
+        return Optional.empty();
     }
 
     @Async
@@ -138,12 +168,20 @@ public class ScraperServiceImpl implements ScraperService {
             log.info("No new jobs to persist.");
             return;
         }
+
         Set<String> existingUrls = new HashSet<>(jobRepository.findAllJobUrls());
+
         List<JobScrapedData> newJobsData = jobsData.stream()
                 .filter(data -> !existingUrls.contains(data.jobPageUrl()))
                 .toList();
 
+        if (newJobsData.isEmpty()) {
+            log.info("No new jobs found to persist.");
+            return;
+        }
+
         log.info("Persisting {} new jobs...", newJobsData.size());
+
         Map<String, Organization> organizations = findOrCreateOrganizations(newJobsData);
         Map<String, Tag> tags = findOrCreateTags(newJobsData);
         Map<String, Location> locations = findOrCreateLocations(newJobsData);
@@ -194,7 +232,6 @@ public class ScraperServiceImpl implements ScraperService {
         Map<String, Organization> existingOrgs = organizationRepository.findByUrlIn(orgUrls).stream()
                 .collect(Collectors.toMap(Organization::getUrl, Function.identity()));
 
-        // Створюємо мапу URL -> DTO, щоб уникнути повторного пошуку
         Map<String, JobScrapedData> dataByUrl = jobsData.stream()
                 .collect(Collectors.toMap(JobScrapedData::orgUrl, Function.identity(), (d1, d2) -> d1));
 
@@ -203,7 +240,7 @@ public class ScraperServiceImpl implements ScraperService {
                 .map(data -> Organization.builder()
                         .title(data.orgTitle())
                         .url(data.orgUrl())
-                        .logoUrl(data.orgLogoUrl()) // <-- Зберігаємо логотип при створенні
+                        .logoUrl(data.orgLogoUrl())
                         .build())
                 .toList();
 
@@ -217,23 +254,18 @@ public class ScraperServiceImpl implements ScraperService {
         Set<String> tagNames = jobsData.stream()
                 .flatMap(data -> data.tagNames().stream())
                 .collect(Collectors.toSet());
+
         Map<String, Tag> existingTags = tagRepository.findByNameIn(tagNames).stream()
                 .collect(Collectors.toMap(Tag::getName, Function.identity()));
+
         List<Tag> newTagsToSave = tagNames.stream()
                 .filter(name -> !existingTags.containsKey(name))
                 .map(name -> Tag.builder().name(name).build())
                 .toList();
+
         if (!newTagsToSave.isEmpty()) {
             tagRepository.saveAll(newTagsToSave).forEach(tag -> existingTags.put(tag.getName(), tag));
         }
         return existingTags;
-    }
-
-    private HttpHeaders createHeaders() {
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
-        headers.set("User-Agent", USER_AGENT);
-        return headers;
     }
 }
