@@ -22,38 +22,36 @@ public class GetroApiServiceImpl implements GetroApiService {
     @Override
     public List<GetroJobResponse.JobPayload> fetchAllJobSummaries(String jobFunction) {
         List<GetroJobResponse.JobPayload> allJobs = new ArrayList<>();
-        Set<String> seenSlugs = new HashSet<>();
-        int totalSize = 0;
+        int page = 0;
+        boolean hasMoreJobs;
 
-        for (int page = 0; ; page++) {
+        log.info("Starting to fetch job summaries for function: '{}'", jobFunction);
+
+        do {
             GetroApiRequest request = new GetroApiRequest(new GetroApiRequest.Filters(List.of(jobFunction)), page);
             GetroJobResponse apiResponse = getroApiClient.searchJobsByFunction(request);
 
-            totalSize = apiResponse.results().count();
-
-            log.info("Total size of jobs {}", totalSize);
-
-            if (apiResponse == null || apiResponse.results() == null
-                    || apiResponse.results().jobs() == null
-                    || apiResponse.results().jobs().isEmpty()) {
+            if (apiResponse == null || apiResponse.results() == null || apiResponse.results().jobs().isEmpty()) {
                 log.info("API returned no more jobs on page {}. Finishing pagination.", page);
-                break;
+                hasMoreJobs = false;
+            } else {
+                List<GetroJobResponse.JobPayload> jobsOnPage = apiResponse.results().jobs();
+                log.info("Fetched page {}. Found {} jobs. Total count in API: {}", page, jobsOnPage.size(), apiResponse.results().count());
+
+                List<GetroJobResponse.JobPayload> jobsWithDescription = jobsOnPage.stream()
+                        .filter(GetroJobResponse.JobPayload::hasDescription)
+                        .toList();
+
+                log.info("Filtered jobs on page {}. Jobs with description: {}", page, jobsWithDescription.size());
+                allJobs.addAll(jobsWithDescription);
+
+                page++;
+                hasMoreJobs = true;
             }
 
-            List<GetroJobResponse.JobPayload> jobsOnPage = apiResponse.results().jobs();
+        } while (hasMoreJobs);
 
-            log.info("Fetched page {}. Found {} jobs",
-                    page, jobsOnPage.size());
-
-            List<GetroJobResponse.JobPayload> jobsWithDescription = jobsOnPage.stream()
-                    .filter(GetroJobResponse.JobPayload::hasDescription)
-                    .toList();
-
-            log.info("Jobs that has description :{}", jobsWithDescription.size());
-
-            allJobs.addAll(jobsWithDescription);
-        }
-
+        log.info("Finished fetching jobs for function: '{}'. Total jobs found with description: {}", jobFunction, allJobs.size());
         return allJobs;
     }
 }

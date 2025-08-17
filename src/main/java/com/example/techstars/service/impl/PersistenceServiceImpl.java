@@ -18,7 +18,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -85,80 +84,89 @@ public class PersistenceServiceImpl implements PersistenceService {
         log.info("Successfully saved {} new jobs to the database.", jobsToSave.size());
     }
 
-    private <T> Map<String, T> findOrCreateByName(
-            Set<String> names,
-            Function<Set<String>, List<T>> finder,
-            Function<String, T> creator,
-            Function<T, String> nameExtractor,
-            JpaRepository<T, ?> repository
-    ) {
-        if (names.isEmpty()) {
-            return Collections.emptyMap();
-        }
-
-        Map<String, T> existingEntities = finder.apply(names).stream()
-                .collect(Collectors.toMap(nameExtractor, Function.identity()));
-
-        List<T> newEntitiesToSave = names.stream()
-                .filter(name -> !existingEntities.containsKey(name))
-                .map(creator)
-                .toList();
-
-        if (!newEntitiesToSave.isEmpty()) {
-            repository.saveAll(newEntitiesToSave)
-                    .forEach(entity -> existingEntities.put(nameExtractor.apply(entity), entity));
-        }
-        return existingEntities;
-    }
-
     private Map<String, Location> findOrCreateLocations(List<JobScrapedData> jobsData) {
-        Set<String> locationNames = jobsData.stream()
+        Set<String> allLocationNames = jobsData.stream()
                 .flatMap(data -> data.locationNames().stream())
                 .collect(Collectors.toSet());
 
-        return findOrCreateByName(
-                locationNames,
-                locationRepository::findByNameIn,
-                name -> Location.builder().name(name).build(),
-                Location::getName,
-                locationRepository
-        );
+        if (allLocationNames.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Location> existingLocations = locationRepository.findByNameIn(allLocationNames);
+        Map<String, Location> locationMap = existingLocations.stream()
+                .collect(Collectors.toMap(Location::getName, Function.identity()));
+
+        List<Location> newLocationsToCreate = allLocationNames.stream()
+                .filter(name -> !locationMap.containsKey(name))
+                .map(name -> Location.builder().name(name).build())
+                .toList();
+
+        if (!newLocationsToCreate.isEmpty()) {
+            List<Location> savedLocations = locationRepository.saveAll(newLocationsToCreate);
+            savedLocations.forEach(loc -> locationMap.put(loc.getName(), loc));
+        }
+
+        return locationMap;
     }
 
     private Map<String, Tag> findOrCreateTags(List<JobScrapedData> jobsData) {
-        Set<String> tagNames = jobsData.stream()
+        Set<String> allTagNames = jobsData.stream()
                 .flatMap(data -> data.tagNames().stream())
                 .collect(Collectors.toSet());
 
-        return findOrCreateByName(
-                tagNames,
-                tagRepository::findByNameIn,
-                name -> Tag.builder().name(name).build(),
-                Tag::getName,
-                tagRepository
-        );
+        if (allTagNames.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Tag> existingTags = tagRepository.findByNameIn(allTagNames);
+        Map<String, Tag> tagMap = existingTags.stream()
+                .collect(Collectors.toMap(Tag::getName, Function.identity()));
+
+        List<Tag> newTagsToCreate = allTagNames.stream()
+                .filter(name -> !tagMap.containsKey(name))
+                .map(name -> Tag.builder().name(name).build())
+                .toList();
+
+        if (!newTagsToCreate.isEmpty()) {
+            List<Tag> savedTags = tagRepository.saveAll(newTagsToCreate);
+            savedTags.forEach(tag -> tagMap.put(tag.getName(), tag));
+        }
+
+        return tagMap;
     }
 
     private Map<String, Organization> findOrCreateOrganizations(List<JobScrapedData> jobsData) {
-        Set<String> orgUrls = jobsData.stream().map(JobScrapedData::orgUrl).collect(Collectors.toSet());
-        Map<String, Organization> existingOrgs = organizationRepository.findByUrlIn(orgUrls).stream()
+        Map<String, JobScrapedData> uniqueOrgDataByUrl = jobsData.stream()
+                .collect(Collectors.toMap(JobScrapedData::orgUrl, Function.identity(), (first, second) -> first));
+
+        if (uniqueOrgDataByUrl.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Set<String> allOrgUrls = uniqueOrgDataByUrl.keySet();
+
+        List<Organization> existingOrgs = organizationRepository.findByUrlIn(allOrgUrls);
+        Map<String, Organization> orgMap = existingOrgs.stream()
                 .collect(Collectors.toMap(Organization::getUrl, Function.identity()));
 
-        Map<String, JobScrapedData> dataByUrl = jobsData.stream()
-                .collect(Collectors.toMap(JobScrapedData::orgUrl, Function.identity(), (d1, d2) -> d1));
-
-        List<Organization> newOrgsToSave = dataByUrl.values().stream()
-                .filter(data -> !existingOrgs.containsKey(data.orgUrl()))
-                .map(data -> Organization.builder()
-                        .title(data.orgTitle())
-                        .url(data.orgUrl())
-                        .logoUrl(data.orgLogoUrl())
-                        .build())
+        List<Organization> newOrgsToCreate = allOrgUrls.stream()
+                .filter(url -> !orgMap.containsKey(url))
+                .map(url -> {
+                    JobScrapedData data = uniqueOrgDataByUrl.get(url);
+                    return Organization.builder()
+                            .title(data.orgTitle())
+                            .url(data.orgUrl())
+                            .logoUrl(data.orgLogoUrl())
+                            .build();
+                })
                 .toList();
 
-        if (!newOrgsToSave.isEmpty()) {
-            organizationRepository.saveAll(newOrgsToSave).forEach(org -> existingOrgs.put(org.getUrl(), org));
+        if (!newOrgsToCreate.isEmpty()) {
+            List<Organization> savedOrgs = organizationRepository.saveAll(newOrgsToCreate);
+            savedOrgs.forEach(org -> orgMap.put(org.getUrl(), org));
         }
-        return existingOrgs;
+
+        return orgMap;
     }
 }
