@@ -4,7 +4,6 @@ import com.example.techstars.dto.JobDto;
 import com.example.techstars.dto.PageDto;
 import com.example.techstars.model.Function;
 import com.example.techstars.service.JobService;
-import com.example.techstars.service.SheetExportService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -19,7 +18,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -31,7 +29,6 @@ import org.springframework.web.bind.annotation.RestController;
 @Tag(name = "Job Controller", description = "Endpoints for retrieving and filtering jobs")
 public class JobController {
     private final JobService jobService;
-    private final SheetExportService googleSheetsService;
 
     @GetMapping
     @Operation(summary = "Get all jobs", description = "Returns a paginated list of all jobs.")
@@ -94,14 +91,5 @@ public class JobController {
     @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
     public ResponseEntity<Long> getJobCountByFunction(@PathVariable String function) {
         return ResponseEntity.ok(jobService.getJobCountByFunction(function));
-    }
-
-    @PostMapping("/export/sheets/{laborFunction}")
-    @Operation(summary = "Export jobs to google sheets")
-    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
-    public ResponseEntity<String> exportJobsToGoogleSheets(@PathVariable String laborFunction) {
-        return googleSheetsService.exportJobsToGoogleSheets(laborFunction)
-                ? ResponseEntity.ok("Jobs exported to Google Sheets successfully")
-                : ResponseEntity.internalServerError().body("Failed to export jobs to Google Sheets");
     }
 } 

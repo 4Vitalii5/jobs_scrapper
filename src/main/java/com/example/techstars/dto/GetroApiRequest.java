@@ -5,7 +5,7 @@ import java.util.List;
 
 public record GetroApiRequest(
         Filters filters,
-        int from
+        int page
 ) {
     public record Filters(
             @JsonProperty("job_functions") List<String> jobFunctions

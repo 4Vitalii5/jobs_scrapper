@@ -5,7 +5,7 @@ import com.example.techstars.model.Location;
 import com.example.techstars.model.Organization;
 import com.example.techstars.model.Tag;
 import com.example.techstars.repository.JobRepository;
-import com.example.techstars.service.ExportService;
+import com.example.techstars.service.Exporter;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -21,31 +21,19 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class ExportServiceImpl implements ExportService {
+public class ExportServiceImpl implements Exporter {
     private final JobRepository jobRepository;
+    private static final String FORMAT = "sql";
 
     @Override
-    @Transactional(readOnly = true) // Додаємо транзакцію для лінивої ініціалізації
-    public String exportDatabaseToSqlFile() throws IOException {
-        String fileName = "techstars_jobs_export_" +
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".sql";
-        Path filePath = Paths.get(fileName);
-
-        try (FileWriter writer = new FileWriter(filePath.toFile())) {
-            writer.write("-- Techstars Jobs Full Data Export\n");
-            writer.write("-- Generated on: " + LocalDateTime.now() + "\n\n");
-
-            List<Job> allJobs = jobRepository.findAll();
-            writeDataForJobs(writer, allJobs);
-        }
-
-        log.info("Database data exported successfully to: {}", fileName);
-        return fileName;
+    public String getFormat() {
+        return FORMAT;
     }
 
     @Override
-    @Transactional(readOnly = true) // Додаємо транзакцію для лінивої ініціалізації
-    public String exportJobsByFunctionToSql(String laborFunction) throws IOException {
+    @Transactional(readOnly = true)
+    public String exportByFunction(String laborFunction) throws IOException {
+        // Перейменовуємо exportJobsByFunctionToSql -> exportByFunction
         String fileName =
                 "techstars_" + laborFunction.replaceAll("[^a-zA-Z0-9]", "_") + "_export_" +
                         LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
@@ -62,7 +50,26 @@ public class ExportServiceImpl implements ExportService {
         }
 
         log.info("Jobs for function '{}' exported successfully to: {}", laborFunction, fileName);
-        return fileName;
+        return "Jobs for function '" + laborFunction + "' exported successfully to file: "
+                + fileName;
+    }
+
+    @Transactional(readOnly = true)
+    public String exportDatabaseToSqlFile() throws IOException {
+        String fileName = "techstars_jobs_export_" +
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss")) + ".sql";
+        Path filePath = Paths.get(fileName);
+
+        try (FileWriter writer = new FileWriter(filePath.toFile())) {
+            writer.write("-- Techstars Jobs Full Data Export\n");
+            writer.write("-- Generated on: " + LocalDateTime.now() + "\n\n");
+
+            List<Job> allJobs = jobRepository.findAll();
+            writeDataForJobs(writer, allJobs);
+        }
+
+        log.info("Database data exported successfully to: {}", fileName);
+        return "Full database exported successfully to file: " + fileName;
     }
 
     private void writeDataForJobs(FileWriter writer, List<Job> jobs) throws IOException {
@@ -71,7 +78,6 @@ public class ExportServiceImpl implements ExportService {
             return;
         }
 
-        // Збираємо всі унікальні пов'язані сутності
         List<Organization> organizations = jobs.stream()
                 .map(Job::getOrganization)
                 .distinct()
@@ -82,13 +88,11 @@ public class ExportServiceImpl implements ExportService {
                 .distinct()
                 .toList();
 
-        // Збираємо всі унікальні локації
         List<Location> locations = jobs.stream()
                 .flatMap(job -> job.getLocations().stream())
                 .distinct()
                 .toList();
 
-        // --- Вставка даних в довідкові таблиці ---
 
         if (!organizations.isEmpty()) {
             writer.write("-- Insert organizations\n");
@@ -117,11 +121,9 @@ public class ExportServiceImpl implements ExportService {
             writer.write("\n");
         }
 
-        // --- Вставка даних в основну таблицю ---
 
         writer.write("-- Insert jobs\n");
         for (Job job : jobs) {
-            // Видаляємо location та address з INSERT-запиту
             writer.write(String.format(
                     "INSERT INTO job (id, position_name, job_page_url, "
                             + "labor_function, posted_date, description, organization_id) "
@@ -135,8 +137,6 @@ public class ExportServiceImpl implements ExportService {
                     job.getOrganization().getId()));
         }
         writer.write("\n");
-
-        // --- Вставка даних в проміжні таблиці ---
 
         writer.write("-- Insert job-location relationships\n");
         for (Job job : jobs) {
@@ -155,8 +155,6 @@ public class ExportServiceImpl implements ExportService {
             }
         }
         writer.write("\n");
-
-        // --- Оновлення послідовностей ---
 
         writer.write("-- Reset sequences to avoid conflicts on next inserts\n");
         writer.write("SELECT setval('organization_id_seq', (SELECT MAX(id) FROM organization), true);\n");

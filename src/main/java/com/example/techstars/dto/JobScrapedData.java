@@ -4,7 +4,7 @@ import java.util.Set;
 
 public record JobScrapedData(
         String positionName,
-        String jobPageUrl,
+        String jobUrl,
         String laborFunction,
         Set<String> locationNames,
         long postedDate,

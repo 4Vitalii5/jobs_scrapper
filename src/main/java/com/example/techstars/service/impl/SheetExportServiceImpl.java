@@ -5,7 +5,7 @@ import com.example.techstars.dto.JobDto;
 import com.example.techstars.mapper.JobMapper;
 import com.example.techstars.model.Job;
 import com.example.techstars.repository.JobRepository;
-import com.example.techstars.service.SheetExportService;
+import com.example.techstars.service.Exporter;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
@@ -38,7 +38,9 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 @Slf4j
-public class SheetExportServiceImpl implements SheetExportService {
+public class SheetExportServiceImpl implements Exporter {
+
+    private static final String FORMAT = "sheets";
 
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private static final List<String> SCOPES = List.of(SheetsScopes.SPREADSHEETS);
@@ -64,59 +66,67 @@ public class SheetExportServiceImpl implements SheetExportService {
     private final JobRepository jobRepository;
 
     @Override
-    public boolean exportJobsToGoogleSheets(String laborFunction) {
+    public String getFormat() {
+        return FORMAT;
+    }
+
+    @Override
+    public String exportByFunction(String laborFunction) {
         try {
-            List<Job> jobs = jobRepository.findByLaborFunction(laborFunction);
-            if (jobs.isEmpty()) {
-                log.warn("No jobs found for function: {}", laborFunction);
-                return false;
+            // Крок 1: Отримати дані
+            List<JobDto> jobDtos = fetchAndMapJobs(laborFunction);
+            if (jobDtos.isEmpty()) {
+                return "No jobs found for function: " + laborFunction;
             }
 
-            List<JobDto> jobDtos = jobs.stream()
-                    .map(jobMapper::toDto)
-                    .collect(Collectors.toList());
+            Sheets service = buildSheetsService();
 
-            return uploadToGoogleSheets(jobDtos, laborFunction);
+            ensureSheetExists(service, laborFunction);
+
+            uploadDataToSheet(service, jobDtos, laborFunction);
+
+            return "Successfully exported " + jobDtos.size() + " jobs for '" + laborFunction + "' to Google Sheets.";
         } catch (Exception e) {
             log.error("Error exporting jobs to Google Sheets: {}", e.getMessage(), e);
-            return false;
+            return "An error occurred during export: " + e.getMessage();
         }
     }
 
-    private boolean uploadToGoogleSheets(List<JobDto> jobs, String sheetName) {
-        try {
-            NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-            HttpCredentialsAdapter credential = getCredentials(httpTransport);
+    private List<JobDto> fetchAndMapJobs(String laborFunction) {
+        List<Job> jobs = jobRepository.findByLaborFunction(laborFunction);
+        return jobs.stream()
+                .map(jobMapper::toDto)
+                .collect(Collectors.toList());
+    }
 
-            Sheets service = new Sheets.Builder(httpTransport, JSON_FACTORY, credential)
-                    .setApplicationName("Techstars Job Scraper")
-                    .build();
+    private Sheets buildSheetsService() throws Exception {
+        NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
+        GoogleCredentials credentials = getCredentialsFromBase64();
 
-            ensureSheetExists(service, sheetsProperties.getSpreadsheetId(), sheetName);
+        return new Sheets.Builder(httpTransport, JSON_FACTORY, new HttpCredentialsAdapter(credentials))
+                .setApplicationName("Techstars Job Scraper")
+                .build();
+    }
 
-            String formattedSheetName = formatSheetName(sheetName);
+    private void uploadDataToSheet(Sheets service, List<JobDto> jobs, String sheetName) throws IOException {
+        String spreadsheetId = sheetsProperties.getSpreadsheetId();
+        String formattedSheetName = formatSheetName(sheetName);
 
-            String clearRange = formattedSheetName + "!A:Z";
-            service.spreadsheets().values()
-                    .clear(sheetsProperties.getSpreadsheetId(), clearRange, new ClearValuesRequest())
-                    .execute();
+        // Очищення аркуша
+        String clearRange = formattedSheetName + "!A:Z";
+        service.spreadsheets().values().clear(spreadsheetId, clearRange, new ClearValuesRequest()).execute();
 
-            List<List<Object>> data = prepareDataForUpload(jobs);
-            ValueRange body = new ValueRange().setValues(data);
+        // Підготовка даних
+        List<List<Object>> data = prepareDataForUpload(jobs);
+        ValueRange body = new ValueRange().setValues(data);
 
-            String updateRange = formattedSheetName + "!A1";
-            service.spreadsheets().values()
-                    .update(sheetsProperties.getSpreadsheetId(), updateRange, body)
-                    .setValueInputOption("RAW")
-                    .execute();
+        // Оновлення
+        String updateRange = formattedSheetName + "!A1";
+        service.spreadsheets().values().update(spreadsheetId, updateRange, body)
+                .setValueInputOption("RAW")
+                .execute();
 
-            log.info("Successfully uploaded {} jobs to Google Sheets sheet '{}'", jobs.size(), sheetName);
-            return true;
-        } catch (Exception e) {
-            log.error("Error uploading to Google Sheets: {}", e.getMessage(), e);
-            e.printStackTrace();
-            return false;
-        }
+        log.info("Successfully uploaded {} jobs to Google Sheets sheet '{}'", jobs.size(), sheetName);
     }
 
     private String formatSheetName(String sheetName) {
@@ -126,7 +136,13 @@ public class SheetExportServiceImpl implements SheetExportService {
         return sheetName;
     }
 
-    private void ensureSheetExists(Sheets service, String spreadsheetId, String sheetName) throws IOException {
+    private void ensureSheetExists(Sheets service, String sheetName) throws IOException {
+        String spreadsheetId = sheetsProperties.getSpreadsheetId();
+
+        if (StringUtils.isBlank(spreadsheetId)) {
+            throw new IllegalStateException("Google Sheets spreadsheetId is not configured.");
+        }
+
         Spreadsheet spreadsheet = service.spreadsheets().get(spreadsheetId).execute();
         boolean sheetExists = spreadsheet.getSheets().stream()
                 .anyMatch(sheet -> sheet.getProperties().getTitle().equalsIgnoreCase(sheetName));
@@ -171,20 +187,20 @@ public class SheetExportServiceImpl implements SheetExportService {
                 .format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE);
     }
 
-    private HttpCredentialsAdapter getCredentials(NetHttpTransport httpTransport) throws IOException {
+    private GoogleCredentials getCredentialsFromBase64() throws IOException {
         String credentialsBase64 = sheetsProperties.getCredentials().getBase64();
 
         if (StringUtils.isBlank(credentialsBase64)) {
-            throw new IllegalStateException("Google Sheets credentials not configured. Please set GOOGLE_CREDENTIALS_BASE64 environment variable.");
+            throw new IllegalStateException("Google Sheets credentials not configured. " +
+                    "Please set the GOOGLE_CREDENTIALS_JSON environment variable.");
         }
 
         byte[] decodedBytes = Base64.getDecoder().decode(credentialsBase64);
 
         try (InputStream inputStream = new ByteArrayInputStream(decodedBytes)) {
-            GoogleCredentials credentials = ServiceAccountCredentials.fromStream(inputStream)
+            // Створюємо та повертаємо об'єкт credentials
+            return ServiceAccountCredentials.fromStream(inputStream)
                     .createScoped(SCOPES);
-
-            return new HttpCredentialsAdapter(credentials);
         }
     }
 }

@@ -2,6 +2,7 @@ package com.example.techstars.repository;
 
 import com.example.techstars.model.Job;
 import java.util.List;
+import java.util.Set;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -27,6 +28,6 @@ public interface JobRepository extends JpaRepository<Job, Long>, JpaSpecificatio
     @Query("SELECT COUNT(j) FROM Job j WHERE j.laborFunction = :function")
     long countByLaborFunction(@Param("function") String function);
 
-    @Query("SELECT j.jobPageUrl FROM Job j")
-    List<String> findAllJobUrls();
+    @Query("SELECT j.jobPageUrl FROM Job j WHERE j.jobPageUrl IN :urls")
+    Set<String> findExistingUrls(@Param("urls") Set<String> urls);
 }
