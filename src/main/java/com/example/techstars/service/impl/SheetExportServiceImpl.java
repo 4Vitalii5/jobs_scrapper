@@ -198,7 +198,6 @@ public class SheetExportServiceImpl implements Exporter {
         byte[] decodedBytes = Base64.getDecoder().decode(credentialsBase64);
 
         try (InputStream inputStream = new ByteArrayInputStream(decodedBytes)) {
-            // Створюємо та повертаємо об'єкт credentials
             return ServiceAccountCredentials.fromStream(inputStream)
                     .createScoped(SCOPES);
         }
