@@ -9,8 +9,9 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class OrganizationDTO {
+public class OrganizationDto {
     private Long id;
     private String title;
     private String url;
+    private String logoUrl;
 } 

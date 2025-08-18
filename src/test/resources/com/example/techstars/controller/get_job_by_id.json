@@ -1,0 +1,22 @@
+{
+  "id": 1,
+  "positionName": "Senior Java Developer",
+  "jobPageUrl": "https://jobs.techstars.com/jobs/1",
+  "laborFunction": "Software Engineering",
+  "postedDate": 1672531200,
+  "description": "Senior Java Developer position",
+  "locations": [
+    "London",
+    "Remote"
+  ],
+  "organization": {
+    "id": 1,
+    "title": "Techstars",
+    "url": "https://jobs.techstars.com/companies/techstars",
+    "logoUrl": "https://logo.url/techstars.png"
+  },
+  "tags": [
+    "Java",
+    "Spring"
+  ]
+}

@@ -1,21 +1,21 @@
 package com.example.techstars.controller;
 
-import com.example.techstars.dto.JobDTO;
-import com.example.techstars.dto.OrganizationDTO;
-import com.example.techstars.dto.TagDTO;
-import com.example.techstars.model.Job;
-import com.example.techstars.repository.JobRepository;
-import com.example.techstars.repository.JobSpecification;
-import java.util.Collections;
+import com.example.techstars.dto.JobDto;
+import com.example.techstars.dto.PageDto;
+import com.example.techstars.model.Function;
+import com.example.techstars.service.JobService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.util.List;
-import java.util.Optional;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
+import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
-import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -25,67 +25,72 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/jobs")
 @RequiredArgsConstructor
+@CrossOrigin(origins = "*")
+@Tag(name = "Job Controller", description = "Endpoints for retrieving and filtering jobs")
 public class JobController {
-    private final JobRepository jobRepository;
+    private final JobService jobService;
 
     @GetMapping
-    public Page<JobDTO> getJobs(
-            @RequestParam(required = false) String location,
-            @RequestParam(required = false) String jobFunction,
-            @RequestParam(required = false) String tags,
-            @RequestParam(defaultValue = "postedDate") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size
-    ) {
-        Sort sort = Sort.by(sortDir.equalsIgnoreCase("asc") ? Sort.Direction.ASC : Sort.Direction.DESC, sortBy);
-        Pageable pageable = PageRequest.of(page, size, sort);
-
-        List<String> tagList = tags != null
-                && !tags.isEmpty() ? List.of(tags.split(",")) : Collections.emptyList();
-
-        Specification<Job> spec = JobSpecification.findByCriteria(location, jobFunction, tagList);
-
-        Page<Job> jobsPage = jobRepository.findAll(spec, pageable);
-
-        return jobsPage.map(this::convertToDto);
+    @Operation(summary = "Get all jobs", description = "Returns a paginated list of all jobs.")
+    public ResponseEntity<PageDto<JobDto>> getAllJobs(@ParameterObject Pageable pageable) {
+        return ResponseEntity.ok(jobService.getAllJobs(pageable));
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<JobDTO> getJobById(@PathVariable Long id) {
-        return jobRepository.findById(id)
-                .map(this::convertToDto)
-                .map(ResponseEntity::ok)
-                .orElseGet(() -> ResponseEntity.notFound().build());
+    @Operation(summary = "Get a job by its ID")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Job found"),
+            @ApiResponse(responseCode = "404", description = "Job not found", content = @Content)
+    })
+    public ResponseEntity<JobDto> getJobById(@PathVariable Long id) {
+        return ResponseEntity.ok(jobService.getJobById(id));
     }
 
-    private JobDTO convertToDto(Job job) {
-        OrganizationDTO orgDto = Optional.ofNullable(job.getOrganization())
-                .map(org -> OrganizationDTO.builder()
-                        .id(org.getId())
-                        .title(org.getTitle())
-                        .url(org.getUrl())
-                        .build())
-                .orElse(null);
+    @GetMapping("/function/{laborFunction}")
+    @Operation(summary = "Get jobs by labor function")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<List<JobDto>> getJobsByFunction(
+            @Parameter(description = "Labor function to filter by (e.g., 'Software Engineering')", required = true)
+            @PathVariable Function laborFunction
+    ) {
+        return ResponseEntity.ok(jobService.getJobsByFunction(laborFunction.getLabel()));
+    }
 
-        List<TagDTO> tagDtos = Optional.ofNullable(job.getTags()).orElse(Collections.emptySet()).stream()
-                .map(tag -> TagDTO.builder()
-                        .id(tag.getId())
-                        .name(tag.getName())
-                        .build())
-                .toList();
+    @GetMapping("/location/{location}")
+    @Operation(summary = "Get jobs by location")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<List<JobDto>> getJobsByLocation(@PathVariable String location) {
+        return ResponseEntity.ok(jobService.getJobsByLocation(location));
+    }
 
-        return JobDTO.builder()
-                .id(job.getId())
-                .positionName(job.getPositionName())
-                .jobPageUrl(job.getJobPageUrl())
-                .logoUrl(job.getLogoUrl())
-                .laborFunction(job.getLaborFunction())
-                .postedDate(job.getPostedDate())
-                .description(job.getDescription())
-                .location(job.getLocation())
-                .organization(orgDto)
-                .tags(tagDtos)
-                .build();
+    @GetMapping("/date-range")
+    @Operation(summary = "Get jobs by date range")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<List<JobDto>> getJobsByDateRange(
+            @RequestParam Long startDate,
+            @RequestParam Long endDate) {
+        return ResponseEntity.ok(jobService.getJobsByDateRange(startDate, endDate));
+    }
+
+    @GetMapping("/functions")
+    @Operation(summary = "Get all labor functions")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<List<String>> getAllLaborFunctions() {
+        return ResponseEntity.ok(jobService.getAllLaborFunctions());
+    }
+
+    @GetMapping("/locations")
+    @Operation(summary = "Get all locations")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<List<String>> getAllLocations() {
+        return ResponseEntity.ok(jobService.getAllLocations());
+    }
+
+    @GetMapping("/count/{function}")
+    @Operation(summary = "Get job quantity by labor function")
+    @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
+    public ResponseEntity<Long> getJobCountByFunction(@Parameter(description = "Labor function to filter by (e.g., 'Software Engineering')", required = true)
+                                                          @PathVariable Function laborFunction) {
+        return ResponseEntity.ok(jobService.getJobCountByFunction(laborFunction.getLabel()));
     }
 } 

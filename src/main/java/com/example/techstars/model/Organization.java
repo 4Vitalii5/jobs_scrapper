@@ -25,6 +25,9 @@ public class Organization {
     @Column(nullable = false)
     private String title;
 
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private String url;
+
+    @Column(nullable = false)
+    private String logoUrl;
 } 

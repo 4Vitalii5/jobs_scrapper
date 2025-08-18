@@ -1,9 +1,11 @@
-version: '3.7'
+version: '3.8'
 services:
   postgres:
-    image: postgres:11.7
+    image: postgres:17-alpine
+    container_name: techstars_postgres
     ports:
-      - 5433:5432
+      - "5433:5432"
     environment:
       POSTGRES_DB: "techstars_db"
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
