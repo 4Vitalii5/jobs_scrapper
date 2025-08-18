@@ -8,15 +8,22 @@ import com.example.techstars.repository.JobRepository;
 import com.example.techstars.service.Exporter;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.FileCopyUtils;
 
 @Service
 @RequiredArgsConstructor
@@ -33,7 +40,6 @@ public class ExportServiceImpl implements Exporter {
     @Override
     @Transactional(readOnly = true)
     public String exportByFunction(String laborFunction) throws IOException {
-        // Перейменовуємо exportJobsByFunctionToSql -> exportByFunction
         String fileName =
                 "techstars_" + laborFunction.replaceAll("[^a-zA-Z0-9]", "_") + "_export_" +
                         LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
@@ -46,10 +52,11 @@ public class ExportServiceImpl implements Exporter {
             writer.write("-- Techstars Jobs Export for Function: " + laborFunction + "\n");
             writer.write("-- Generated on: " + LocalDateTime.now() + "\n\n");
 
+            writeSchemaCreationScript(writer);
+
             writeDataForJobs(writer, jobsByFunction);
         }
 
-        log.info("Jobs for function '{}' exported successfully to: {}", laborFunction, fileName);
         return "Jobs for function '" + laborFunction + "' exported successfully to file: "
                 + fileName;
     }
@@ -64,15 +71,43 @@ public class ExportServiceImpl implements Exporter {
             writer.write("-- Techstars Jobs Full Data Export\n");
             writer.write("-- Generated on: " + LocalDateTime.now() + "\n\n");
 
+            writeSchemaCreationScript(writer);
+
             List<Job> allJobs = jobRepository.findAll();
             writeDataForJobs(writer, allJobs);
         }
 
-        log.info("Database data exported successfully to: {}", fileName);
         return "Full database exported successfully to file: " + fileName;
     }
 
+    private void writeSchemaCreationScript(FileWriter writer) throws IOException {
+        log.info("Writing database schema to the export file...");
+        writer.write("-- ======================================================================\n");
+        writer.write("-- Database Schema Creation\n");
+        writer.write("-- ======================================================================\n\n");
+
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
+        Resource[] migrationFiles = resolver.getResources("classpath:db/migration/*.sql");
+
+        Arrays.sort(migrationFiles, Comparator.comparing(Resource::getFilename));
+
+        for (Resource resource : migrationFiles) {
+            writer.write("-- Sourcing migration: " + resource.getFilename() + "\n");
+            try (InputStream inputStream = resource.getInputStream()) {
+                byte[] bdata = FileCopyUtils.copyToByteArray(inputStream);
+                String data = new String(bdata, StandardCharsets.UTF_8);
+                writer.write(data);
+                writer.write("\n\n");
+            }
+        }
+        log.info("Successfully wrote {} migration scripts.", migrationFiles.length);
+    }
+
     private void writeDataForJobs(FileWriter writer, List<Job> jobs) throws IOException {
+        writer.write("-- ======================================================================\n");
+        writer.write("-- Data Insertion\n");
+        writer.write("-- ======================================================================\n\n");
+
         if (jobs.isEmpty()) {
             writer.write("-- No jobs found to export.\n");
             return;
@@ -158,7 +193,7 @@ public class ExportServiceImpl implements Exporter {
 
         writer.write("-- Reset sequences to avoid conflicts on next inserts\n");
         writer.write("SELECT setval('organization_id_seq', (SELECT MAX(id) FROM organization), true);\n");
-        writer.write("SELECT setval('location_id_seq', (SELECT MAX(id) FROM location), true);\n"); // Додаємо для location
+        writer.write("SELECT setval('location_id_seq', (SELECT MAX(id) FROM location), true);\n");
         writer.write("SELECT setval('tag_id_seq', (SELECT MAX(id) FROM tag), true);\n");
         writer.write("SELECT setval('job_id_seq', (SELECT MAX(id) FROM job), true);\n");
     }

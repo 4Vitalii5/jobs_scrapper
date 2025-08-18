@@ -1,0 +1,68 @@
+organization:
+  - id: 1
+    title: "Techstars"
+    url: "https://jobs.techstars.com/companies/techstars"
+    logo_url: "https://logo.url/techstars.png"
+  - id: 2
+    title: "Google"
+    url: "https://jobs.techstars.com/companies/google"
+    logo_url: "https://logo.url/google.png"
+
+location:
+  - id: 1
+    name: "Remote"
+  - id: 2
+    name: "New York, NY"
+  - id: 3
+    name: "London"
+
+tag:
+  - id: 1
+    name: "Java"
+  - id: 2
+    name: "Spring"
+  - id: 3
+    name: "Kubernetes"
+
+job:
+  - id: 1
+    position_name: "Senior Java Developer"
+    job_page_url: "https://jobs.techstars.com/jobs/1"
+    labor_function: "Software Engineering"
+    posted_date: 1672531200 # 2023-01-01
+    description: "Senior Java Developer position"
+    organization_id: 1
+  - id: 2
+    position_name: "Product Manager"
+    job_page_url: "https://jobs.techstars.com/jobs/2"
+    labor_function: "Product"
+    posted_date: 1675209600 # 2023-02-01
+    description: "Product Manager role"
+    organization_id: 2
+  - id: 3
+    position_name: "DevOps Engineer"
+    job_page_url: "https://jobs.techstars.com/jobs/3"
+    labor_function: "Software Engineering"
+    posted_date: 1677628800 # 2023-03-01
+    description: "DevOps position in New York"
+    organization_id: 1
+
+job_location:
+  - job_id: 1
+    location_id: 1
+  - job_id: 1
+    location_id: 3
+  - job_id: 2
+    location_id: 2
+  - job_id: 2
+    location_id: 1
+  - job_id: 3
+    location_id: 2
+
+job_tag:
+  - job_id: 1
+    tag_id: 1
+  - job_id: 1
+    tag_id: 2
+  - job_id: 3
+    tag_id: 3

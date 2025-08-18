@@ -1,7 +1,9 @@
 package com.example.techstars.dto;
 
 import java.util.Set;
+import lombok.Builder;
 
+@Builder
 public record JobScrapedData(
         String positionName,
         String jobUrl,

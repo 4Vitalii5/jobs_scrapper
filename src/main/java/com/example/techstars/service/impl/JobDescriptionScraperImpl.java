@@ -23,7 +23,7 @@ public class JobDescriptionScraperImpl implements JobDescriptionScraper {
     );
 
     @Override
-    @Retryable(retryFor = IOException.class, maxAttempts = 3, backoff = @Backoff(delay = 1000))
+    @Retryable(retryFor = IOException.class, backoff = @Backoff(delay = 1000))
     public Optional<String> fetchJobDescription(String jobUrl) {
         try {
             Document doc = Jsoup.connect(jobUrl)
@@ -31,7 +31,7 @@ public class JobDescriptionScraperImpl implements JobDescriptionScraper {
                     .timeout(30000)
                     .get();
             Element descriptionElement = doc.select("div[data-testid='careerPage'], div[class*='job-description']").first();
-            
+
             if (descriptionElement != null) {
                 return Optional.of(descriptionElement.html());
             }

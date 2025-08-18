@@ -1,0 +1,17 @@
+{
+  "content": [
+    {
+      "id": 3,
+      "positionName": "DevOps Engineer",
+      "laborFunction": "Software Engineering"
+    },
+    {
+      "id": 2,
+      "positionName": "Product Manager",
+      "laborFunction": "Product"
+    }
+  ],
+  "currentPage": 0,
+  "totalPages": 2,
+  "totalElements": 3
+}

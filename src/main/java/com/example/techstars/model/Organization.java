@@ -25,9 +25,9 @@ public class Organization {
     @Column(nullable = false)
     private String title;
 
-    @Column(nullable = false, unique = true) // Додамо унікальність для URL
+    @Column(nullable = false, unique = true)
     private String url;
 
-    @Column(nullable = false) // <-- ДОДАЄМО НОВЕ ПОЛЕ
+    @Column(nullable = false)
     private String logoUrl;
 } 

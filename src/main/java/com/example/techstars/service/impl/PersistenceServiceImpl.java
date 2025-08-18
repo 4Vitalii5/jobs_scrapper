@@ -57,8 +57,6 @@ public class PersistenceServiceImpl implements PersistenceService {
             return;
         }
 
-        log.info("Found {} new jobs to persist...", newJobsData.size());
-
         Map<String, Organization> organizations = findOrCreateOrganizations(newJobsData);
         Map<String, Tag> tags = findOrCreateTags(newJobsData);
         Map<String, Location> locations = findOrCreateLocations(newJobsData);
@@ -81,7 +79,6 @@ public class PersistenceServiceImpl implements PersistenceService {
         }).toList();
 
         jobRepository.saveAll(jobsToSave);
-        log.info("Successfully saved {} new jobs to the database.", jobsToSave.size());
     }
 
     private Map<String, Location> findOrCreateLocations(List<JobScrapedData> jobsData) {

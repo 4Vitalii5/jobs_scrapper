@@ -89,7 +89,8 @@ public class JobController {
     @GetMapping("/count/{function}")
     @Operation(summary = "Get job quantity by labor function")
     @ApiResponses(value = {@ApiResponse(responseCode = "200", description = "Successfully retrieved jobs")})
-    public ResponseEntity<Long> getJobCountByFunction(@PathVariable String function) {
-        return ResponseEntity.ok(jobService.getJobCountByFunction(function));
+    public ResponseEntity<Long> getJobCountByFunction(@Parameter(description = "Labor function to filter by (e.g., 'Software Engineering')", required = true)
+                                                          @PathVariable Function laborFunction) {
+        return ResponseEntity.ok(jobService.getJobCountByFunction(laborFunction.getLabel()));
     }
 } 

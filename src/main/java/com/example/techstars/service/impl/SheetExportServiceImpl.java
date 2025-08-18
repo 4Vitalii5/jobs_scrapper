@@ -1,6 +1,7 @@
 package com.example.techstars.service.impl;
 
 import com.example.techstars.config.GoogleSheetsProperties;
+import com.example.techstars.dto.ColumnDefinition;
 import com.example.techstars.dto.JobDto;
 import com.example.techstars.mapper.JobMapper;
 import com.example.techstars.model.Job;
@@ -28,7 +29,6 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,20 +45,27 @@ public class SheetExportServiceImpl implements Exporter {
     private static final JsonFactory JSON_FACTORY = GsonFactory.getDefaultInstance();
     private static final List<String> SCOPES = List.of(SheetsScopes.SPREADSHEETS);
 
-    private record ColumnDefinition(String header, Function<JobDto, Object> extractor) {
-    }
-
     private static final List<ColumnDefinition> COLUMN_DEFINITIONS = List.of(
-            new ColumnDefinition("Position Name", JobDto::getPositionName),
-            new ColumnDefinition("Job Page URL", JobDto::getJobPageUrl),
-            new ColumnDefinition("Labor Function", JobDto::getLaborFunction),
-            new ColumnDefinition("Posted Date", job -> formatDate(job.getPostedDate())),
-            new ColumnDefinition("Locations", job -> String.join(", ", job.getLocations())),
-            new ColumnDefinition("Organization Title", job -> job.getOrganization().getTitle()),
-            new ColumnDefinition("Organization URL", job -> job.getOrganization().getUrl()),
-            new ColumnDefinition("Organization Logo", job -> job.getOrganization().getLogoUrl()),
-            new ColumnDefinition("Tags", job -> String.join(", ", job.getTags())),
-            new ColumnDefinition("Description", JobDto::getDescription)
+            ColumnDefinition.builder().header("Position Name").extractor(JobDto::getPositionName)
+                    .build(),
+            ColumnDefinition.builder().header("Job Page URL").extractor(JobDto::getJobPageUrl)
+                    .build(),
+            ColumnDefinition.builder().header("Labor Function").extractor(JobDto::getLaborFunction)
+                    .build(),
+            ColumnDefinition.builder().header("Posted Date").extractor(job -> formatDate(job.getPostedDate()))
+                    .build(),
+            ColumnDefinition.builder().header("Locations").extractor(job -> String.join(", ", job.getLocations()))
+                    .build(),
+            ColumnDefinition.builder().header("Organization Title").extractor(job -> job.getOrganization().getTitle())
+                    .build(),
+            ColumnDefinition.builder().header("Organization URL").extractor(job -> job.getOrganization().getUrl())
+                    .build(),
+            ColumnDefinition.builder().header("Organization Logo").extractor(job -> job.getOrganization().getLogoUrl())
+                    .build(),
+            ColumnDefinition.builder().header("Tags").extractor(job -> String.join(", ", job.getTags()))
+                    .build(),
+            ColumnDefinition.builder().header("Description").extractor(JobDto::getDescription)
+                    .build()
     );
 
     private final JobMapper jobMapper;
@@ -73,7 +80,6 @@ public class SheetExportServiceImpl implements Exporter {
     @Override
     public String exportByFunction(String laborFunction) {
         try {
-            // Крок 1: Отримати дані
             List<JobDto> jobDtos = fetchAndMapJobs(laborFunction);
             if (jobDtos.isEmpty()) {
                 return "No jobs found for function: " + laborFunction;
@@ -85,7 +91,8 @@ public class SheetExportServiceImpl implements Exporter {
 
             uploadDataToSheet(service, jobDtos, laborFunction);
 
-            return "Successfully exported " + jobDtos.size() + " jobs for '" + laborFunction + "' to Google Sheets.";
+            return "Successfully exported " + jobDtos.size() + " jobs for '" + laborFunction
+                    + "' to Google Sheets.";
         } catch (Exception e) {
             log.error("Error exporting jobs to Google Sheets: {}", e.getMessage(), e);
             return "An error occurred during export: " + e.getMessage();
@@ -112,21 +119,16 @@ public class SheetExportServiceImpl implements Exporter {
         String spreadsheetId = sheetsProperties.getSpreadsheetId();
         String formattedSheetName = formatSheetName(sheetName);
 
-        // Очищення аркуша
         String clearRange = formattedSheetName + "!A:Z";
         service.spreadsheets().values().clear(spreadsheetId, clearRange, new ClearValuesRequest()).execute();
 
-        // Підготовка даних
         List<List<Object>> data = prepareDataForUpload(jobs);
         ValueRange body = new ValueRange().setValues(data);
 
-        // Оновлення
         String updateRange = formattedSheetName + "!A1";
         service.spreadsheets().values().update(spreadsheetId, updateRange, body)
                 .setValueInputOption("RAW")
                 .execute();
-
-        log.info("Successfully uploaded {} jobs to Google Sheets sheet '{}'", jobs.size(), sheetName);
     }
 
     private String formatSheetName(String sheetName) {

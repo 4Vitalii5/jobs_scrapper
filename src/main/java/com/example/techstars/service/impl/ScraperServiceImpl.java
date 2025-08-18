@@ -6,13 +6,9 @@ import com.example.techstars.service.GetroApiService;
 import com.example.techstars.service.JobDescriptionScraper;
 import com.example.techstars.service.PersistenceService;
 import com.example.techstars.service.ScraperService;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Function;
-import java.util.function.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -49,26 +45,23 @@ public class ScraperServiceImpl implements ScraperService {
         }
     }
 
-    private static <T> Predicate<T> distinctByKey(Function<? super T, ?> keyExtractor) {
-        Set<Object> seen = ConcurrentHashMap.newKeySet();
-        return t -> seen.add(keyExtractor.apply(t));
-    }
-
     private Optional<JobScrapedData> toJobScrapedData(GetroJobResponse.JobPayload payload, String jobFunction) {
         String jobUrl = ORG_BASE_URL + payload.organization().slug() + "/jobs/" + payload.slug();
 
         return jobDescriptionScraper.fetchJobDescription(jobUrl)
-                .map(description -> new JobScrapedData(
-                        payload.title(),
-                        jobUrl,
-                        jobFunction,
-                        new HashSet<>(payload.locations()),
-                        payload.createdAt(),
-                        description,
-                        payload.organization().name(),
-                        ORG_BASE_URL + payload.organization().slug(),
-                        payload.organization().logoUrl(),
-                        new HashSet<>(payload.tags())
-                ));
+                .map(description ->
+                        JobScrapedData.builder()
+                                .positionName(payload.title())
+                                .jobUrl(jobUrl)
+                                .laborFunction(jobFunction)
+                                .locationNames(Set.copyOf(payload.locations()))
+                                .postedDate(payload.createdAt())
+                                .description(description)
+                                .orgTitle(payload.organization().name())
+                                .orgUrl(ORG_BASE_URL + payload.organization().slug())
+                                .orgLogoUrl(payload.organization().logoUrl())
+                                .tagNames(Set.copyOf(payload.tags()))
+                                .build()
+                );
     }
 }
